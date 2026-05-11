@@ -14,12 +14,10 @@ export interface Challenge {
   slug: string;
   raw_text: string;
   standard_answer: string;
-  difficulty: number;
   status: string;
   play_count: number;
   created_at: string;
   published_at: string;
-  tags?: string[];
 }
 
 export interface Submission {

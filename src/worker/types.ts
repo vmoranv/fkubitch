@@ -23,12 +23,10 @@ export interface Challenge {
   raw_text: string;
   standard_answer: string;
   answer_key_json: string;
-  difficulty: number;
   status: 'draft' | 'published' | 'archived';
   play_count: number;
   created_at: string;
   published_at: string;
-  tags?: string[];
 }
 
 export interface Submission {

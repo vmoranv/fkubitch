@@ -10,21 +10,12 @@ const challenges = new Hono<{ Bindings: Env }>();
 challenges.get('/', async (c) => {
   const page = parseInt(c.req.query('page') || '1');
   const limit = Math.min(parseInt(c.req.query('limit') || '20'), 50);
-  const difficulty = c.req.query('difficulty');
   const offset = (page - 1) * limit;
 
-  let query = 'SELECT c.* FROM challenges c WHERE c.status = ?';
-  const params: unknown[] = ['published'];
+  const result = await c.env.DB.prepare(
+    'SELECT c.* FROM challenges c WHERE c.status = ? ORDER BY c.play_count DESC, c.created_at DESC LIMIT ? OFFSET ?'
+  ).bind('published', limit, offset).all();
 
-  if (difficulty) {
-    query += ' AND c.difficulty = ?';
-    params.push(parseInt(difficulty));
-  }
-
-  query += ' ORDER BY c.play_count DESC, c.created_at DESC LIMIT ? OFFSET ?';
-  params.push(limit, offset);
-
-  const result = await c.env.DB.prepare(query).bind(...params).all();
   const items = result.results.map((row: Record<string, unknown>) => ({
     ...row,
     raw_text: (row.raw_text as string).length > 30
@@ -32,10 +23,9 @@ challenges.get('/', async (c) => {
       : row.raw_text,
   }));
 
-  const countQuery = 'SELECT COUNT(*) as total FROM challenges WHERE status = ?' + (difficulty ? ' AND difficulty = ?' : '');
-  const countParams: unknown[] = ['published'];
-  if (difficulty) countParams.push(parseInt(difficulty));
-  const countResult = await c.env.DB.prepare(countQuery).bind(...countParams).first<{ total: number }>();
+  const countResult = await c.env.DB.prepare(
+    'SELECT COUNT(*) as total FROM challenges WHERE status = ?'
+  ).bind('published').first<{ total: number }>();
 
   return c.json({ success: true, data: { items, total: countResult?.total || 0, page, limit } });
 });

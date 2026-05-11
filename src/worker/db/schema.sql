@@ -44,24 +44,10 @@ CREATE TABLE IF NOT EXISTS challenges (
     raw_text TEXT NOT NULL,
     standard_answer TEXT NOT NULL,
     answer_key_json TEXT NOT NULL,
-    difficulty INTEGER NOT NULL CHECK (difficulty BETWEEN 1 AND 5),
     status TEXT NOT NULL DEFAULT 'published' CHECK (status IN ('draft', 'published', 'archived')),
     play_count INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     published_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS tags (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE
-);
-
-CREATE TABLE IF NOT EXISTS challenge_tags (
-    challenge_id INTEGER NOT NULL,
-    tag_id INTEGER NOT NULL,
-    PRIMARY KEY (challenge_id, tag_id),
-    FOREIGN KEY (challenge_id) REFERENCES challenges(id) ON DELETE CASCADE,
-    FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS daily_challenges (
@@ -121,9 +107,8 @@ CREATE TABLE IF NOT EXISTS model_results (
 CREATE INDEX IF NOT EXISTS idx_users_score ON users(total_score DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_user_expires ON auth_sessions(user_id, expires_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON auth_sessions(refresh_token_hash);
-CREATE INDEX IF NOT EXISTS idx_challenges_status ON challenges(status, difficulty);
+CREATE INDEX IF NOT EXISTS idx_challenges_status ON challenges(status);
 CREATE INDEX IF NOT EXISTS idx_challenges_created ON challenges(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_challenge_tags_tag ON challenge_tags(tag_id);
 CREATE INDEX IF NOT EXISTS idx_submissions_user ON submissions(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_submissions_challenge ON submissions(challenge_id, score_total DESC);
 CREATE INDEX IF NOT EXISTS idx_progress_user ON user_challenge_progress(user_id);

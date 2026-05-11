@@ -65,7 +65,7 @@ users.get('/me/progress', requireAuth, async (c) => {
   if (!user) return c.json({ success: false, error: '用户不存在' }, 404);
 
   const progress = await c.env.DB.prepare(
-    `SELECT ucp.*, c.slug as challenge_slug, c.raw_text, c.difficulty
+    `SELECT ucp.*, c.slug as challenge_slug, c.raw_text
      FROM user_challenge_progress ucp
      JOIN challenges c ON ucp.challenge_id = c.id
      WHERE ucp.user_id = ?
