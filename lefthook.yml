@@ -1,0 +1,11 @@
+pre-commit:
+  parallel: true
+  commands:
+    pages-build:
+      root: "src/pages"
+      glob: "src/**/*.{ts,vue,css}"
+      run: npx vite build
+    pages-typecheck:
+      root: "src/pages"
+      glob: "src/**/*.{ts,vue}"
+      run: npx vue-tsc --noEmit --project tsconfig.json

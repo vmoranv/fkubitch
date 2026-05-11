@@ -1,0 +1,25 @@
+{
+  "name": "fuckubitch",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx wrangler dev & cd src/pages && npx vite",
+    "dev:worker": "npx wrangler dev",
+    "dev:pages": "cd src/pages && npx vite",
+    "deploy": "npx wrangler deploy",
+    "db:migrate": "npx wrangler d1 execute fuckubitch-db --local --file=src/worker/db/schema.sql",
+    "db:seed": "npx wrangler d1 execute fuckubitch-db --local --file=src/worker/db/seed.sql",
+    "db:init": "pnpm db:migrate && pnpm db:seed",
+    "pages:build": "cd src/pages && pnpm build",
+    "setup": "pnpm install && cd src/pages && pnpm install && pnpm db:migrate && pnpm db:seed"
+  },
+  "dependencies": {
+    "hono": "^4.0.0",
+    "jose": "^5.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241201.0",
+    "wrangler": "^3.90.0"
+  }
+}
