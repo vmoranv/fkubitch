@@ -3,62 +3,42 @@ import type { Env } from '../types';
 
 const leaderboard = new Hono<{ Bindings: Env }>();
 
+// 人类排行榜
 leaderboard.get('/', async (c) => {
   const limit = Math.min(parseInt(c.req.query('limit') || '50'), 100);
-  const period = c.req.query('period') || 'all';
-
-  if (period === 'daily') {
-    const today = new Date().toISOString().split('T')[0];
-    const result = await c.env.DB.prepare(
-      `SELECT u.public_id as user_id, u.nickname, u.avatar_url,
-              SUM(ucp.best_score) as score
-       FROM users u
-       JOIN user_challenge_progress ucp ON u.id = ucp.user_id
-       WHERE date(ucp.last_submitted_at) = ?
-       GROUP BY u.id
-       ORDER BY score DESC
-       LIMIT ?`
-    ).bind(today, limit).all();
-
-    return c.json({
-      success: true,
-      data: result.results.map((row: Record<string, unknown>, i: number) => ({
-        rank: i + 1, ...row,
-      })),
-    });
-  }
-
-  if (period === 'weekly') {
-    const result = await c.env.DB.prepare(
-      `SELECT u.public_id as user_id, u.nickname, u.avatar_url,
-              SUM(ucp.best_score) as score
-       FROM users u
-       JOIN user_challenge_progress ucp ON u.id = ucp.user_id
-       WHERE ucp.last_submitted_at >= datetime('now', '-7 days')
-       GROUP BY u.id
-       ORDER BY score DESC
-       LIMIT ?`
-    ).bind(limit).all();
-
-    return c.json({
-      success: true,
-      data: result.results.map((row: Record<string, unknown>, i: number) => ({
-        rank: i + 1, ...row,
-      })),
-    });
-  }
 
   const result = await c.env.DB.prepare(
     `SELECT public_id as user_id, nickname, avatar_url, total_score as score
-     FROM users
-     ORDER BY total_score DESC
-     LIMIT ?`
+     FROM users ORDER BY total_score DESC LIMIT ?`
+  ).bind(limit).all();
+
+  return c.json({
+    success: true,
+    data: result.results.map((row: Record<string, unknown>, i: number) => ({ rank: i + 1, ...row })),
+  });
+});
+
+// LLM 排行榜
+leaderboard.get('/models', async (c) => {
+  const limit = Math.min(parseInt(c.req.query('limit') || '50'), 100);
+
+  const result = await c.env.DB.prepare(
+    `SELECT provider, model_name, AVG(score_total) as avg_score, COUNT(*) as runs,
+            MAX(score_total) as best_score
+     FROM model_results
+     GROUP BY provider, model_name
+     ORDER BY avg_score DESC LIMIT ?`
   ).bind(limit).all();
 
   return c.json({
     success: true,
     data: result.results.map((row: Record<string, unknown>, i: number) => ({
-      rank: i + 1, ...row,
+      rank: i + 1,
+      provider: row.provider,
+      model_name: row.model_name,
+      avg_score: Math.round(row.avg_score as number),
+      best_score: row.best_score,
+      runs: row.runs,
     })),
   });
 });

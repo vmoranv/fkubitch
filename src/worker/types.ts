@@ -9,10 +9,6 @@ export interface User {
   updated_at: string;
 }
 
-export interface AnswerKeySegment {
-  pos: number;
-}
-
 export interface AnswerKey {
   positions: number[];
 }
@@ -21,12 +17,10 @@ export interface Challenge {
   id: number;
   slug: string;
   raw_text: string;
-  standard_answer: string;
   answer_key_json: string;
   status: 'draft' | 'published' | 'archived';
   play_count: number;
   created_at: string;
-  published_at: string;
 }
 
 export interface Submission {
@@ -35,11 +29,9 @@ export interface Submission {
   user_id: number;
   challenge_id: number;
   segmented_text: string;
-  normalized_text: string;
   score_total: number;
-  score_edit: number;
-  score_punctuation: number;
-  scoring_version: string;
+  score_segment: number;
+  score_penalty: number;
   created_at: string;
   user_nickname?: string;
 }
@@ -47,10 +39,9 @@ export interface Submission {
 export interface UserChallengeProgress {
   user_id: number;
   challenge_id: number;
-  best_submission_id: number;
+  best_submission_id: number | null;
   best_score: number;
   attempts: number;
-  first_submitted_at: string;
   last_submitted_at: string;
 }
 
@@ -60,10 +51,9 @@ export interface ModelResult {
   provider: string;
   model_name: string;
   segmented_text: string;
-  normalized_text: string;
   score_total: number;
-  score_edit: number;
-  score_punctuation: number;
+  score_segment: number;
+  score_penalty: number;
   created_at: string;
 }
 
@@ -72,7 +62,7 @@ export interface LeaderboardEntry {
   user_id: string;
   nickname: string;
   avatar_url: string | null;
-  total_score: number;
+  score: number;
 }
 
 export interface ApiResponse<T> {
