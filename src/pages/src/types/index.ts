@@ -13,11 +13,10 @@ export interface Challenge {
   id: number;
   slug: string;
   raw_text: string;
-  standard_answer: string;
+  answer_key_json: string;
   status: string;
   play_count: number;
   created_at: string;
-  published_at: string;
 }
 
 export interface Submission {

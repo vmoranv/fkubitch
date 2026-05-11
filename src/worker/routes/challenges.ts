@@ -7,19 +7,6 @@ import { turnstileVerify } from '../middleware/turnstile';
 
 const challenges = new Hono<{ Bindings: Env }>();
 
-function deriveAnswer(raw: string, positions: number[]): string {
-  const sorted = [...positions].sort((a, b) => a - b);
-  let r = '', p = 0;
-  for (const pos of sorted) { r += raw.slice(p, pos) + '|'; p = pos; }
-  return r + raw.slice(p);
-}
-
-function toResponse(row: Record<string, unknown>) {
-  const raw = row.raw_text as string;
-  const key = JSON.parse(row.answer_key_json as string || '{"positions":[]}');
-  return { ...row, standard_answer: deriveAnswer(raw, key.positions) };
-}
-
 challenges.get('/', async (c) => {
   const page = parseInt(c.req.query('page') || '1');
   const limit = Math.min(parseInt(c.req.query('limit') || '20'), 50);
@@ -30,11 +17,10 @@ challenges.get('/', async (c) => {
   ).bind('published', limit, offset).all();
 
   const items = result.results.map((r: Record<string, unknown>) => {
-    const data = toResponse(r);
-    if ((data.raw_text as string).length > 30) {
-      data.raw_text = (data.raw_text as string).slice(0, 30) + '…';
+    if ((r.raw_text as string).length > 30) {
+      r.raw_text = (r.raw_text as string).slice(0, 30) + '…';
     }
-    return data;
+    return r;
   });
 
   const countResult = await c.env.DB.prepare(
@@ -49,7 +35,7 @@ challenges.get('/daily', async (c) => {
   const daily = await c.env.DB.prepare(
     'SELECT c.* FROM challenges c JOIN daily_challenges dc ON c.id = dc.challenge_id WHERE dc.challenge_date = ?'
   ).bind(today).first();
-  if (daily) return c.json({ success: true, data: toResponse(daily as Record<string, unknown>) });
+  if (daily) return c.json({ success: true, data: daily });
 
   const fallback = await c.env.DB.prepare(
     'SELECT * FROM challenges WHERE status = ? ORDER BY RANDOM() LIMIT 1'
@@ -58,7 +44,7 @@ challenges.get('/daily', async (c) => {
     await c.env.DB.prepare(
       'INSERT OR IGNORE INTO daily_challenges (challenge_date, challenge_id) VALUES (?, ?)'
     ).bind(today, (fallback as Record<string, unknown>).id).run();
-    return c.json({ success: true, data: toResponse(fallback as Record<string, unknown>) });
+    return c.json({ success: true, data: fallback });
   }
   return c.json({ success: true, data: null });
 });
@@ -68,7 +54,7 @@ challenges.get('/:slug', async (c) => {
     'SELECT * FROM challenges WHERE slug = ? AND status = ?'
   ).bind(c.req.param('slug'), 'published').first();
   if (!row) return c.json({ success: false, error: '挑战不存在' }, 404);
-  return c.json({ success: true, data: toResponse(row as Record<string, unknown>) });
+  return c.json({ success: true, data: row });
 });
 
 challenges.get('/:slug/submissions', async (c) => {
