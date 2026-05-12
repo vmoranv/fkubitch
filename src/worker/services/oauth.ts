@@ -21,20 +21,20 @@ export async function generateCodeChallenge(verifier: string): Promise<string> {
   return base64url(digest);
 }
 
-export function getGitHubAuthUrl(clientId: string, state: string): string {
+export function getGitHubAuthUrl(clientId: string, redirectUri: string, state: string): string {
   const params = new URLSearchParams({
     client_id: clientId,
-    redirect_uri: '/api/auth/github/callback',
+    redirect_uri: redirectUri,
     scope: 'read:user user:email',
     state,
   });
   return `https://github.com/login/oauth/authorize?${params}`;
 }
 
-export function getGoogleAuthUrl(clientId: string, codeChallenge: string, state: string): string {
+export function getGoogleAuthUrl(clientId: string, redirectUri: string, codeChallenge: string, state: string): string {
   const params = new URLSearchParams({
     client_id: clientId,
-    redirect_uri: '/api/auth/google/callback',
+    redirect_uri: redirectUri,
     response_type: 'code',
     scope: 'openid email profile',
     code_challenge: codeChallenge,
@@ -47,24 +47,35 @@ export function getGoogleAuthUrl(clientId: string, codeChallenge: string, state:
 export async function exchangeGitHubCode(
   code: string,
   clientId: string,
-  clientSecret: string
+  clientSecret: string,
+  redirectUri: string
 ): Promise<{ providerUserId: string; email: string | null; login: string; avatarUrl: string }> {
+  const body = new URLSearchParams({ client_id: clientId, client_secret: clientSecret, code });
+  body.set('redirect_uri', redirectUri);
   const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
+      'Content-Type': 'application/x-www-form-urlencoded',
       Accept: 'application/json',
     },
-    body: JSON.stringify({
-      client_id: clientId,
-      client_secret: clientSecret,
-      code,
-    }),
+    body: body.toString(),
   });
 
-  const tokenData = await tokenRes.json() as { access_token?: string; error?: string };
+  const tokenText = await tokenRes.text();
+  let tokenData: { access_token?: string; error?: string; error_description?: string };
+  try {
+    tokenData = JSON.parse(tokenText);
+  } catch {
+    // GitHub might return form-encoded on error
+    const params = new URLSearchParams(tokenText);
+    tokenData = {
+      error: params.get('error') || 'parse_failed',
+      error_description: params.get('error_description') || tokenText.slice(0, 100),
+    };
+  }
+
   if (!tokenData.access_token) {
-    throw new Error(`GitHub token exchange failed: ${tokenData.error || 'unknown'}`);
+    throw new Error(`GitHub token exchange failed: ${tokenData.error} - ${tokenData.error_description || ''}`);
   }
 
   const userRes = await fetch('https://api.github.com/user', {
@@ -94,7 +105,8 @@ export async function exchangeGoogleCode(
   code: string,
   codeVerifier: string,
   clientId: string,
-  clientSecret: string
+  clientSecret: string,
+  redirectUri: string
 ): Promise<{ providerUserId: string; email: string | null; name: string; avatarUrl: string }> {
   const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
@@ -105,8 +117,8 @@ export async function exchangeGoogleCode(
       code,
       code_verifier: codeVerifier,
       grant_type: 'authorization_code',
-      redirect_uri: '/api/auth/google/callback',
-    }),
+      redirect_uri: redirectUri,
+    }).toString(),
   });
 
   const tokenData = await tokenRes.json() as { access_token?: string; id_token?: string; error?: string };
