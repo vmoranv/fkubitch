@@ -17,6 +17,7 @@ export interface Challenge {
   status: string;
   play_count: number;
   created_at: string;
+  model_count?: number;
 }
 
 export interface Submission {
@@ -34,12 +35,13 @@ export interface Submission {
 
 export interface ModelResult {
   id: number;
+  challenge_id: number;
   provider: string;
   model_name: string;
   segmented_text: string;
   score_total: number;
-  score_edit: number;
-  score_punctuation: number;
+  score_segment: number;
+  score_penalty: number;
   created_at: string;
 }
 
