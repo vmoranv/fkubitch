@@ -1,0 +1,5 @@
+# Allow AI docs that are gitignored but should be readable locally
+!CLAUDE.md
+!DESIGN.md
+!src/worker/CLAUDE.md
+!src/pages/CLAUDE.md

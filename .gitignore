@@ -12,3 +12,7 @@ wrangler.toml.local
 .wrangler/
 pnpm-lock.yaml
 package-lock.json
+
+# AI docs — tracked by .ignore, not git
+CLAUDE.md
+DESIGN.md
