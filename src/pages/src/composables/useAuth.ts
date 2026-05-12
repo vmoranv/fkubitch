@@ -6,10 +6,12 @@ export function useAuth() {
   const auth = useAuthStore();
 
   async function loginGitHub() {
+    auth.closeLogin();
     window.location.href = '/api/auth/github/start';
   }
 
   async function loginGoogle() {
+    auth.closeLogin();
     window.location.href = '/api/auth/google/start';
   }
 
