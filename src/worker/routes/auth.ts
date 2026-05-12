@@ -96,6 +96,9 @@ auth.get('/github/callback', async (c) => {
 });
 
 auth.get('/google/start', async (c) => {
+  if (!c.env.GOOGLE_CLIENT_ID || c.env.GOOGLE_CLIENT_ID === 'dev') {
+    return c.json({ success: false, error: 'Google 登录未配置' }, 404);
+  }
   const base = getBaseUrl(c);
   const state = generateId('go');
   const params = new URLSearchParams({
