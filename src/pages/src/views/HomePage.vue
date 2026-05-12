@@ -2,21 +2,24 @@
 import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useApi } from '@/composables/useApi';
-import type { Challenge } from '@/types';
+import type { Challenge, LeaderboardEntry } from '@/types';
 import { ArrowRight, Trophy, FlaskConical } from 'lucide-vue-next';
 
 const router = useRouter();
 const dailyChallenge = ref<Challenge | null>(null);
 const challenges = ref<Challenge[]>([]);
+const leaderboardEntries = ref<LeaderboardEntry[]>([]);
 const loading = ref(true);
 
 onMounted(async () => {
-  const [dailyRes, listRes] = await Promise.all([
+  const [dailyRes, listRes, lbRes] = await Promise.all([
     useApi<Challenge>('/challenges/daily'),
     useApi<{ items: Challenge[] }>('/challenges?limit=24'),
+    useApi<LeaderboardEntry[]>('/leaderboard'),
   ]);
   dailyChallenge.value = dailyRes.success ? dailyRes.data || null : null;
   challenges.value = listRes.success ? listRes.data?.items || [] : [];
+  leaderboardEntries.value = lbRes.success ? lbRes.data || [] : [];
   loading.value = false;
 });
 
@@ -84,13 +87,21 @@ function goToChallenge(slug: string) { router.push(`/challenge/${slug}`); }
     <!-- Leaderboard preview -->
     <section class="stagger-3">
       <div class="flex items-center justify-between mb-3">
-        <h2 class="text-xs font-bold text-ph-muted uppercase tracking-widest">排行榜</h2>
+        <h2 class="text-xs font-bold text-ph-muted uppercase tracking-widest flex items-center gap-1.5"><Trophy class="w-3.5 h-3.5 text-ph-gold" />排行榜</h2>
         <router-link to="/leaderboard" class="text-11px text-ph-gold font-bold hover:underline flex items-center gap-1">
           全部 <ArrowRight class="w-3 h-3" />
         </router-link>
       </div>
-      <div class="card p-3">
-        <p class="text-xs text-ph-muted text-center py-6">登录后查看排名</p>
+      <div v-if="leaderboardEntries.length === 0" class="bg-ph-surface border border-ph-border rounded-lg p-3">
+        <p class="text-xs text-ph-muted text-center py-4">暂无数据</p>
+      </div>
+      <div v-else class="bg-ph-surface border border-ph-border rounded-lg divide-y divide-ph-border/30">
+        <div v-for="e in leaderboardEntries.slice(0, 5)" :key="e.user_id" class="flex items-center gap-3 px-4 py-2.5">
+          <span class="w-5 text-center shrink-0 text-11px font-bold" :class="e.rank === 1 ? 'text-ph-gold' : e.rank === 2 ? 'text-gray-300' : e.rank === 3 ? 'text-amber-600' : 'text-ph-muted font-mono'">{{ e.rank }}</span>
+          <img v-if="e.avatar_url" :src="e.avatar_url" class="w-6 h-6 rounded-full shrink-0" />
+          <span class="text-xs font-bold text-ph-text flex-1 truncate">{{ e.nickname }}</span>
+          <span class="text-xs font-bold font-mono text-ph-gold shrink-0">{{ e.score }}</span>
+        </div>
       </div>
     </section>
   </div>
