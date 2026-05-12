@@ -5,7 +5,7 @@ const leaderboard = new Hono<{ Bindings: Env }>();
 
 // 人类排行榜
 leaderboard.get('/', async (c) => {
-  const limit = Math.min(parseInt(c.req.query('limit') || '50'), 100);
+  const limit = Math.min(parseInt(c.req.query('limit') || '10'), 10);
 
   const result = await c.env.DB.prepare(
     `SELECT public_id as user_id, nickname, avatar_url, total_score as score
@@ -20,7 +20,7 @@ leaderboard.get('/', async (c) => {
 
 // LLM 排行榜
 leaderboard.get('/models', async (c) => {
-  const limit = Math.min(parseInt(c.req.query('limit') || '50'), 100);
+  const limit = Math.min(parseInt(c.req.query('limit') || '10'), 10);
 
   const result = await c.env.DB.prepare(
     `SELECT provider, model_name, AVG(score_total) as avg_score, COUNT(*) as runs,
