@@ -16,3 +16,7 @@ package-lock.json
 # AI docs — tracked by .ignore, not git
 CLAUDE.md
 DESIGN.md
+.claude/
+
+# Drizzle generated migrations (build artifact)
+drizzle/
