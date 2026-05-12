@@ -1,11 +1,24 @@
 import { Hono } from 'hono';
+import type { Context, Next } from 'hono';
 import type { Env } from '../types';
-import { generateId } from '../utils';
+import { generateId, sha256 } from '../utils';
 import { scoreSubmission } from '../services/scoring';
 import { requireAuth } from '../middleware/auth';
 import { turnstileVerify } from '../middleware/turnstile';
 
 const challenges = new Hono<{ Bindings: Env }>();
+
+// Per-user submit cooldown: userId -> last submit timestamp
+const submitCooldown = new Map<string, number>();
+const SUBMIT_CD_MS = 30_000;
+const CD_PRUNE_MS = 300_000;
+
+function pruneCooldown() {
+  const cutoff = Date.now() - CD_PRUNE_MS;
+  for (const [k, v] of submitCooldown) {
+    if (v < cutoff) submitCooldown.delete(k);
+  }
+}
 
 challenges.get('/', async (c) => {
   const page = parseInt(c.req.query('page') || '1');
@@ -49,6 +62,29 @@ challenges.get('/daily', async (c) => {
   return c.json({ success: true, data: null });
 });
 
+// User submits a new challenge for review
+challenges.post('/submit', requireAuth, async (c) => {
+  const userId = c.get('userId');
+  const body = await c.req.json<{ raw_text: string; answer_key_json: string }>();
+  if (!body.raw_text || !body.answer_key_json) {
+    return c.json({ success: false, error: '缺少必填字段' }, 400);
+  }
+
+  const user = await c.env.DB.prepare('SELECT id, role FROM users WHERE public_id = ?').bind(userId).first<{ id: number; role: string }>();
+  if (!user) return c.json({ success: false, error: '用户不存在' }, 401);
+
+  const slug = (await sha256(body.raw_text)).slice(0, 8);
+  const existing = await c.env.DB.prepare('SELECT id FROM challenges WHERE slug = ?').bind(slug).first();
+  if (existing) return c.json({ success: false, error: '该文本已存在' }, 409);
+
+  const status = user.role === 'admin' ? 'published' : 'pending';
+  await c.env.DB.prepare(
+    'INSERT INTO challenges (slug, raw_text, answer_key_json, status, submitted_by) VALUES (?, ?, ?, ?, ?)'
+  ).bind(slug, body.raw_text, body.answer_key_json, status, user.id).run();
+
+  return c.json({ success: true, data: { slug, status } });
+});
+
 challenges.get('/:slug', async (c) => {
   const row = await c.env.DB.prepare(
     'SELECT * FROM challenges WHERE slug = ? AND status = ?'
@@ -84,7 +120,22 @@ challenges.get('/:slug/model-results', async (c) => {
   return c.json({ success: true, data: results.results });
 });
 
-challenges.post('/:slug/submit', requireAuth, turnstileVerify, async (c) => {
+async function submitCooldownMw(c: Context<{ Bindings: Env }>, next: Next) {
+  const userId = c.get('userId');
+  if (!userId) { await next(); return; }
+  const last = submitCooldown.get(userId);
+  if (last && Date.now() - last < SUBMIT_CD_MS) {
+    const wait = Math.ceil((SUBMIT_CD_MS - (Date.now() - last)) / 1000);
+    return c.json({ success: false, error: `提交太频繁，请等 ${wait} 秒` }, 429);
+  }
+  await next();
+  if (c.res.status < 300) {
+    submitCooldown.set(userId, Date.now());
+    if (submitCooldown.size > 1000) pruneCooldown();
+  }
+}
+
+challenges.post('/:slug/submit', requireAuth, submitCooldownMw, turnstileVerify, async (c) => {
   const slug = c.req.param('slug');
   const userId = c.get('userId');
   const body = await c.json<{ segmented_text: string }>();
