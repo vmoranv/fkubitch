@@ -45,9 +45,11 @@ CREATE TABLE IF NOT EXISTS challenges (
     slug TEXT NOT NULL UNIQUE,
     raw_text TEXT NOT NULL,
     answer_key_json TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'published' CHECK (status IN ('draft', 'published', 'archived')),
+    status TEXT NOT NULL DEFAULT 'published' CHECK (status IN ('draft', 'published', 'archived', 'pending')),
+    submitted_by INTEGER,
     play_count INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (submitted_by) REFERENCES users(id)
 );
 
 CREATE TABLE IF NOT EXISTS daily_challenges (
