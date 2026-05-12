@@ -11,6 +11,10 @@ import { rateLimit } from './middleware/rate-limit';
 
 const app = new Hono<{ Bindings: Env }>();
 
+app.onError((err, c) => {
+  return c.text(err.message || String(err), 500);
+});
+
 app.use('*', corsMiddleware);
 app.use('*', securityHeaders);
 app.use('*', authMiddleware);

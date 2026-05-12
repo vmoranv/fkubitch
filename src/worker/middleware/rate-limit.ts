@@ -3,14 +3,12 @@ import type { Env } from '../types';
 
 const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
 
-setInterval(() => {
+function pruneStore() {
   const now = Date.now();
   for (const [key, entry] of rateLimitStore) {
-    if (entry.resetAt < now) {
-      rateLimitStore.delete(key);
-    }
+    if (entry.resetAt < now) rateLimitStore.delete(key);
   }
-}, 60_000);
+}
 
 export function rateLimit(maxRequests: number, windowSeconds: number) {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
@@ -34,6 +32,8 @@ export function rateLimit(maxRequests: number, windowSeconds: number) {
         error: '请求太频繁，请稍后再试',
       }, 429);
     }
+
+    if (rateLimitStore.size > 5000) pruneStore();
 
     c.header('X-RateLimit-Limit', String(maxRequests));
     c.header('X-RateLimit-Remaining', String(Math.max(0, maxRequests - entry.count)));
