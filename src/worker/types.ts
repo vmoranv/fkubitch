@@ -1,60 +1,14 @@
-export interface User {
-  id: number;
-  public_id: string;
-  nickname: string;
-  avatar_url: string | null;
-  total_score: number;
-  role: 'user' | 'admin';
-  created_at: string;
-  updated_at: string;
-}
+import type { users, challenges, submissions, userChallengeProgress, modelResults } from './db/schema';
+
+export type User = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;
+export type Challenge = typeof challenges.$inferSelect;
+export type Submission = typeof submissions.$inferSelect;
+export type UserChallengeProgress = typeof userChallengeProgress.$inferSelect;
+export type ModelResult = typeof modelResults.$inferSelect;
 
 export interface AnswerKey {
   positions: number[];
-}
-
-export interface Challenge {
-  id: number;
-  slug: string;
-  raw_text: string;
-  answer_key_json: string;
-  status: 'draft' | 'published' | 'archived';
-  play_count: number;
-  created_at: string;
-}
-
-export interface Submission {
-  id: number;
-  public_id: string;
-  user_id: number;
-  challenge_id: number;
-  segmented_text: string;
-  score_total: number;
-  score_segment: number;
-  score_penalty: number;
-  created_at: string;
-  user_nickname?: string;
-}
-
-export interface UserChallengeProgress {
-  user_id: number;
-  challenge_id: number;
-  best_submission_id: number | null;
-  best_score: number;
-  attempts: number;
-  last_submitted_at: string;
-}
-
-export interface ModelResult {
-  id: number;
-  challenge_id: number;
-  provider: string;
-  model_name: string;
-  segmented_text: string;
-  score_total: number;
-  score_segment: number;
-  score_penalty: number;
-  created_at: string;
 }
 
 export interface LeaderboardEntry {
@@ -92,3 +46,11 @@ export interface Env {
   CORS_ORIGIN: string;
   ENVIRONMENT: string;
 }
+
+export type AppType = {
+  Bindings: Env;
+  Variables: {
+    userId: string | null;
+    userRole: 'user' | 'admin' | undefined;
+  };
+};

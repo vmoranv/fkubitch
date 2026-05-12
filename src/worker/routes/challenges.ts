@@ -1,14 +1,16 @@
 import { Hono } from 'hono';
 import type { Context, Next } from 'hono';
-import type { Env } from '../types';
+import type { AppType } from '../types';
 import { generateId, sha256 } from '../utils';
 import { scoreSubmission } from '../services/scoring';
 import { requireAuth } from '../middleware/auth';
 import { turnstileVerify } from '../middleware/turnstile';
+import { createDb } from '../db';
+import { challenges, submissions, users, userChallengeProgress, dailyChallenges } from '../db/schema';
+import { eq, desc, sql, and } from 'drizzle-orm';
 
-const challenges = new Hono<{ Bindings: Env }>();
+const challengesRouter = new Hono<AppType>();
 
-// Per-user submit cooldown: userId -> last submit timestamp
 const submitCooldown = new Map<string, number>();
 const SUBMIT_CD_MS = 30_000;
 const CD_PRUNE_MS = 300_000;
@@ -20,107 +22,158 @@ function pruneCooldown() {
   }
 }
 
-challenges.get('/', async (c) => {
+challengesRouter.get('/', async (c) => {
   const page = parseInt(c.req.query('page') || '1');
   const limit = Math.min(parseInt(c.req.query('limit') || '20'), 50);
   const offset = (page - 1) * limit;
+  const db = createDb(c.env.DB);
 
-  const result = await c.env.DB.prepare(
-    'SELECT * FROM challenges WHERE status = ? ORDER BY play_count DESC, created_at DESC LIMIT ? OFFSET ?'
-  ).bind('published', limit, offset).all();
+  const items = await db.select()
+    .from(challenges)
+    .where(eq(challenges.status, 'published'))
+    .orderBy(desc(challenges.playCount), desc(challenges.createdAt))
+    .limit(limit)
+    .offset(offset)
+    .all();
 
-  const items = result.results.map((r: Record<string, unknown>) => {
-    if ((r.raw_text as string).length > 30) {
-      r.raw_text = (r.raw_text as string).slice(0, 30) + '…';
+  const trimmed = items.map((r) => {
+    if (r.rawText.length > 30) {
+      return { ...r, rawText: r.rawText.slice(0, 30) + '…' };
     }
     return r;
   });
 
-  const countResult = await c.env.DB.prepare(
-    'SELECT COUNT(*) as total FROM challenges WHERE status = ?'
-  ).bind('published').first<{ total: number }>();
+  const countResult = await db.select({ total: sql<number>`cast(count(*) as int)` })
+    .from(challenges)
+    .where(eq(challenges.status, 'published'))
+    .get();
 
-  return c.json({ success: true, data: { items, total: countResult?.total || 0, page, limit } });
+  return c.json({ success: true, data: { items: trimmed, total: countResult?.total || 0, page, limit } });
 });
 
-challenges.get('/daily', async (c) => {
+challengesRouter.get('/daily', async (c) => {
   const today = new Date().toISOString().split('T')[0];
-  const daily = await c.env.DB.prepare(
-    'SELECT c.* FROM challenges c JOIN daily_challenges dc ON c.id = dc.challenge_id WHERE dc.challenge_date = ?'
-  ).bind(today).first();
-  if (daily) return c.json({ success: true, data: daily });
+  const db = createDb(c.env.DB);
 
-  const fallback = await c.env.DB.prepare(
-    'SELECT * FROM challenges WHERE status = ? ORDER BY RANDOM() LIMIT 1'
-  ).bind('published').first();
+  const daily = await db.select()
+    .from(challenges)
+    .innerJoin(dailyChallenges, eq(challenges.id, dailyChallenges.challengeId))
+    .where(eq(dailyChallenges.challengeDate, today))
+    .get();
+  if (daily) return c.json({ success: true, data: daily.challenges });
+
+  const fallback = await db.select()
+    .from(challenges)
+    .where(eq(challenges.status, 'published'))
+    .orderBy(sql`RANDOM()`)
+    .limit(1)
+    .get();
   if (fallback) {
-    await c.env.DB.prepare(
-      'INSERT OR IGNORE INTO daily_challenges (challenge_date, challenge_id) VALUES (?, ?)'
-    ).bind(today, (fallback as Record<string, unknown>).id).run();
+    await db.insert(dailyChallenges).values({
+      challengeDate: today,
+      challengeId: fallback.id,
+    })
+      .onConflictDoNothing()
+      .run();
     return c.json({ success: true, data: fallback });
   }
   return c.json({ success: true, data: null });
 });
 
-// User submits a new challenge for review
-challenges.post('/submit', requireAuth, async (c) => {
-  const userId = c.get('userId');
+challengesRouter.post('/submit', requireAuth, async (c) => {
+  const userId = c.get('userId')!;
   const body = await c.req.json<{ raw_text: string; answer_key_json: string }>();
   if (!body.raw_text || !body.answer_key_json) {
     return c.json({ success: false, error: '缺少必填字段' }, 400);
   }
+  const db = createDb(c.env.DB);
 
-  const user = await c.env.DB.prepare('SELECT id, role FROM users WHERE public_id = ?').bind(userId).first<{ id: number; role: string }>();
+  const user = await db.select({ id: users.id, role: users.role })
+    .from(users)
+    .where(eq(users.publicId, userId))
+    .get();
   if (!user) return c.json({ success: false, error: '用户不存在' }, 401);
 
   const slug = (await sha256(body.raw_text)).slice(0, 8);
-  const existing = await c.env.DB.prepare('SELECT id FROM challenges WHERE slug = ?').bind(slug).first();
+  const existing = await db.select({ id: challenges.id })
+    .from(challenges)
+    .where(eq(challenges.slug, slug))
+    .get();
   if (existing) return c.json({ success: false, error: '该文本已存在' }, 409);
 
   const status = user.role === 'admin' ? 'published' : 'pending';
-  await c.env.DB.prepare(
-    'INSERT INTO challenges (slug, raw_text, answer_key_json, status, submitted_by) VALUES (?, ?, ?, ?, ?)'
-  ).bind(slug, body.raw_text, body.answer_key_json, status, user.id).run();
+  await db.insert(challenges).values({
+    slug,
+    rawText: body.raw_text,
+    answerKeyJson: body.answer_key_json,
+    status: status as 'draft' | 'published' | 'archived' | 'pending',
+    submittedBy: user.id,
+  }).run();
 
   return c.json({ success: true, data: { slug, status } });
 });
 
-challenges.get('/:slug', async (c) => {
-  const row = await c.env.DB.prepare(
-    'SELECT * FROM challenges WHERE slug = ? AND status = ?'
-  ).bind(c.req.param('slug'), 'published').first();
+challengesRouter.get('/:slug', async (c) => {
+  const slug = c.req.param('slug')!;
+  const db = createDb(c.env.DB);
+  const row = await db.select()
+    .from(challenges)
+    .where(and(eq(challenges.slug, slug), eq(challenges.status, 'published')))
+    .get();
   if (!row) return c.json({ success: false, error: '挑战不存在' }, 404);
   return c.json({ success: true, data: row });
 });
 
-challenges.get('/:slug/submissions', async (c) => {
-  const challenge = await c.env.DB.prepare(
-    'SELECT id FROM challenges WHERE slug = ?'
-  ).bind(c.req.param('slug')).first<{ id: number }>();
+challengesRouter.get('/:slug/submissions', async (c) => {
+  const slug = c.req.param('slug')!;
+  const db = createDb(c.env.DB);
+  const challenge = await db.select({ id: challenges.id })
+    .from(challenges)
+    .where(eq(challenges.slug, slug))
+    .get();
   if (!challenge) return c.json({ success: false, error: '挑战不存在' }, 404);
 
   const limit = Math.min(parseInt(c.req.query('limit') || '10'), 20);
-  const subs = await c.env.DB.prepare(
-    `SELECT s.*, u.nickname as user_nickname FROM submissions s
-     JOIN users u ON s.user_id = u.id
-     WHERE s.challenge_id = ? ORDER BY s.score_total DESC LIMIT ?`
-  ).bind(challenge.id, limit).all();
-  return c.json({ success: true, data: subs.results });
+  const subs = await db.select({
+    id: submissions.id,
+    public_id: submissions.publicId,
+    user_id: submissions.userId,
+    challenge_id: submissions.challengeId,
+    segmented_text: submissions.segmentedText,
+    score_total: submissions.scoreTotal,
+    score_segment: submissions.scoreSegment,
+    score_penalty: submissions.scorePenalty,
+    created_at: submissions.createdAt,
+    user_nickname: users.nickname,
+  })
+    .from(submissions)
+    .innerJoin(users, eq(submissions.userId, users.id))
+    .where(eq(submissions.challengeId, challenge.id))
+    .orderBy(desc(submissions.scoreTotal))
+    .limit(limit)
+    .all();
+  return c.json({ success: true, data: subs });
 });
 
-challenges.get('/:slug/model-results', async (c) => {
-  const challenge = await c.env.DB.prepare(
-    'SELECT id FROM challenges WHERE slug = ?'
-  ).bind(c.req.param('slug')).first<{ id: number }>();
+challengesRouter.get('/:slug/model-results', async (c) => {
+  const slug = c.req.param('slug')!;
+  const db = createDb(c.env.DB);
+  const { modelResults } = await import('../db/schema');
+  const challenge = await db.select({ id: challenges.id })
+    .from(challenges)
+    .where(eq(challenges.slug, slug))
+    .get();
   if (!challenge) return c.json({ success: false, error: '挑战不存在' }, 404);
 
-  const results = await c.env.DB.prepare(
-    'SELECT * FROM model_results WHERE challenge_id = ? ORDER BY score_total DESC'
-  ).bind(challenge.id).all();
-  return c.json({ success: true, data: results.results });
+  const results = await db.select()
+    .from(modelResults)
+    .where(eq(modelResults.challengeId, challenge.id))
+    .orderBy(desc(modelResults.scoreTotal))
+    .all();
+  return c.json({ success: true, data: results });
 });
 
-async function submitCooldownMw(c: Context<{ Bindings: Env }>, next: Next) {
+async function submitCooldownMw(c: Context<AppType>, next: Next) {
   const userId = c.get('userId');
   if (!userId) { await next(); return; }
   const last = submitCooldown.get(userId);
@@ -135,62 +188,129 @@ async function submitCooldownMw(c: Context<{ Bindings: Env }>, next: Next) {
   }
 }
 
-challenges.post('/:slug/submit', requireAuth, submitCooldownMw, turnstileVerify, async (c) => {
-  const slug = c.req.param('slug');
-  const userId = c.get('userId');
-  const body = await c.json<{ segmented_text: string }>();
+challengesRouter.post('/:slug/submit', requireAuth, submitCooldownMw, turnstileVerify, async (c) => {
+  const slug = c.req.param('slug')!;
+  const userId = c.get('userId')!;
+  const body = await c.req.json<{ segmented_text: string }>();
   if (!body.segmented_text) return c.json({ success: false, error: '请提供断句结果' }, 400);
+  const db = createDb(c.env.DB);
 
-  const challenge = await c.env.DB.prepare(
-    'SELECT * FROM challenges WHERE slug = ? AND status = ?'
-  ).bind(slug, 'published').first<{ id: number; raw_text: string; answer_key_json: string }>();
+  const challenge = await db.select()
+    .from(challenges)
+    .where(and(eq(challenges.slug, slug), eq(challenges.status, 'published')))
+    .get();
   if (!challenge) return c.json({ success: false, error: '挑战不存在' }, 404);
 
-  const user = await c.env.DB.prepare('SELECT id FROM users WHERE public_id = ?').bind(userId).first<{ id: number }>();
+  const user = await db.select({ id: users.id })
+    .from(users)
+    .where(eq(users.publicId, userId))
+    .get();
   if (!user) return c.json({ success: false, error: '用户不存在' }, 401);
 
-  const scores = scoreSubmission(challenge.raw_text, body.segmented_text, challenge.answer_key_json);
+  const scores = scoreSubmission(challenge.rawText, body.segmented_text, challenge.answerKeyJson);
 
-  const existingSame = await c.env.DB.prepare(
-    'SELECT id FROM submissions WHERE user_id = ? AND challenge_id = ? AND segmented_text = ? LIMIT 1'
-  ).bind(user.id, challenge.id, body.segmented_text).first();
+  const existingSame = await db.select({ id: submissions.id })
+    .from(submissions)
+    .where(and(
+      eq(submissions.userId, user.id),
+      eq(submissions.challengeId, challenge.id),
+      eq(submissions.segmentedText, body.segmented_text),
+    ))
+    .limit(1)
+    .get();
   if (existingSame) return c.json({ success: false, error: '已经提交过相同答案' }, 409);
 
   const submissionId = generateId('sub');
-  await c.env.DB.prepare(
-    'INSERT INTO submissions (public_id, user_id, challenge_id, segmented_text, score_total, score_segment, score_penalty) VALUES (?, ?, ?, ?, ?, ?, ?)'
-  ).bind(submissionId, user.id, challenge.id, body.segmented_text, scores.score_total, scores.score_segment, scores.score_penalty).run();
 
-  const progress = await c.env.DB.prepare(
-    'SELECT * FROM user_challenge_progress WHERE user_id = ? AND challenge_id = ?'
-  ).bind(user.id, challenge.id).first<{ best_score: number; attempts: number }>();
+  const progress = await db.select()
+    .from(userChallengeProgress)
+    .where(and(eq(userChallengeProgress.userId, user.id), eq(userChallengeProgress.challengeId, challenge.id)))
+    .get();
 
   if (progress) {
     const na = progress.attempts + 1;
-    if (scores.score_total > progress.best_score) {
-      const diff = scores.score_total - progress.best_score;
-      await c.env.DB.prepare(
-        'UPDATE user_challenge_progress SET best_score = ?, attempts = ?, last_submitted_at = datetime(\'now\') WHERE user_id = ? AND challenge_id = ?'
-      ).bind(scores.score_total, na, user.id, challenge.id).run();
-      await c.env.DB.prepare('UPDATE users SET total_score = total_score + ?, updated_at = datetime("now") WHERE id = ?').bind(diff, user.id).run();
+    if (scores.score_total > (progress.bestScore ?? 0)) {
+      const diff = scores.score_total - (progress.bestScore ?? 0);
+      await db.batch([
+        db.insert(submissions).values({
+          publicId: submissionId,
+          userId: user.id,
+          challengeId: challenge.id,
+          segmentedText: body.segmented_text,
+          scoreTotal: scores.score_total,
+          scoreSegment: scores.score_segment,
+          scorePenalty: scores.score_penalty,
+        }),
+        db.update(userChallengeProgress).set({
+          bestScore: scores.score_total,
+          attempts: na,
+          lastSubmittedAt: sql`datetime('now')`,
+        }).where(and(eq(userChallengeProgress.userId, user.id), eq(userChallengeProgress.challengeId, challenge.id))),
+        db.update(users).set({
+          totalScore: sql`${users.totalScore} + ${diff}`,
+          updatedAt: sql`datetime('now')`,
+        }).where(eq(users.id, user.id)),
+        db.update(challenges).set({
+          playCount: sql`${challenges.playCount} + 1`,
+        }).where(eq(challenges.id, challenge.id)),
+      ]);
     } else {
-      await c.env.DB.prepare(
-        'UPDATE user_challenge_progress SET attempts = ?, last_submitted_at = datetime(\'now\') WHERE user_id = ? AND challenge_id = ?'
-      ).bind(na, user.id, challenge.id).run();
+      await db.batch([
+        db.insert(submissions).values({
+          publicId: submissionId,
+          userId: user.id,
+          challengeId: challenge.id,
+          segmentedText: body.segmented_text,
+          scoreTotal: scores.score_total,
+          scoreSegment: scores.score_segment,
+          scorePenalty: scores.score_penalty,
+        }),
+        db.update(userChallengeProgress).set({
+          attempts: na,
+          lastSubmittedAt: sql`datetime('now')`,
+        }).where(and(eq(userChallengeProgress.userId, user.id), eq(userChallengeProgress.challengeId, challenge.id))),
+        db.update(challenges).set({
+          playCount: sql`${challenges.playCount} + 1`,
+        }).where(eq(challenges.id, challenge.id)),
+      ]);
     }
   } else {
-    await c.env.DB.prepare(
-      'INSERT INTO user_challenge_progress (user_id, challenge_id, best_score, attempts) VALUES (?, ?, ?, 1)'
-    ).bind(user.id, challenge.id, scores.score_total).run();
-    await c.env.DB.prepare('UPDATE users SET total_score = total_score + ?, updated_at = datetime("now") WHERE id = ?').bind(scores.score_total, user.id).run();
+    await db.batch([
+      db.insert(submissions).values({
+        publicId: submissionId,
+        userId: user.id,
+        challengeId: challenge.id,
+        segmentedText: body.segmented_text,
+        scoreTotal: scores.score_total,
+        scoreSegment: scores.score_segment,
+        scorePenalty: scores.score_penalty,
+      }),
+      db.insert(userChallengeProgress).values({
+        userId: user.id,
+        challengeId: challenge.id,
+        bestScore: scores.score_total,
+        attempts: 1,
+      }),
+      db.update(users).set({
+        totalScore: sql`${users.totalScore} + ${scores.score_total}`,
+        updatedAt: sql`datetime('now')`,
+      }).where(eq(users.id, user.id)),
+      db.update(challenges).set({
+        playCount: sql`${challenges.playCount} + 1`,
+      }).where(eq(challenges.id, challenge.id)),
+    ]);
   }
 
-  await c.env.DB.prepare('UPDATE challenges SET play_count = play_count + 1 WHERE id = ?').bind(challenge.id).run();
+  const updatedUser = await db.select({ totalScore: users.totalScore })
+    .from(users)
+    .where(eq(users.id, user.id))
+    .get();
+  const rank = await db.select({ rank: sql<number>`cast(count(*) + 1 as int)` })
+    .from(users)
+    .where(sql`${users.totalScore} > ${updatedUser?.totalScore || 0}`)
+    .get();
 
-  const updatedUser = await c.env.DB.prepare('SELECT total_score FROM users WHERE id = ?').bind(user.id).first<{ total_score: number }>();
-  const rank = await c.env.DB.prepare('SELECT COUNT(*) + 1 as rank FROM users WHERE total_score > ?').bind(updatedUser?.total_score || 0).first<{ rank: number }>();
-
-  return c.json({ success: true, data: { submission_id: submissionId, ...scores, total_score: updatedUser?.total_score, rank: rank?.rank } });
+  return c.json({ success: true, data: { submission_id: submissionId, ...scores, total_score: updatedUser?.totalScore, rank: rank?.rank } });
 });
 
-export default challenges;
+export default challengesRouter;

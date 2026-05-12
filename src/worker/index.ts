@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { Env } from './types';
+import type { AppType } from './types';
 import authRoutes from './routes/auth';
 import challengeRoutes from './routes/challenges';
 import leaderboardRoutes from './routes/leaderboard';
@@ -9,7 +9,7 @@ import { authMiddleware } from './middleware/auth';
 import { corsMiddleware, securityHeaders } from './middleware/validation';
 import { rateLimit } from './middleware/rate-limit';
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<AppType>();
 
 app.onError((err, c) => {
   return c.text(err.message || String(err), 500);
@@ -23,7 +23,7 @@ app.get('/api/health', (c) => {
   return c.json({ success: true, data: { status: 'ok', timestamp: new Date().toISOString() } });
 });
 
-const api = new Hono<{ Bindings: Env }>();
+const api = new Hono<AppType>();
 
 api.route('/auth', authRoutes);
 api.route('/challenges', challengeRoutes);

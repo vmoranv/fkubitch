@@ -1,10 +1,13 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import type { Env } from '../types';
+import type { AppType, Env } from '../types';
 import { generateId } from '../utils';
 import { signAccessToken, generateRefreshToken, hashToken } from '../services/session';
 import { requireAuth } from '../middleware/auth';
 import { GitHub } from 'arctic';
+import { createDb } from '../db';
+import { users, oauthAccounts, authSessions } from '../db/schema';
+import { eq, and, sql } from 'drizzle-orm';
 
 interface GitHubUser {
   id: number;
@@ -41,19 +44,18 @@ interface TokenResponse {
   error_description?: string;
 }
 
-const auth = new Hono<{ Bindings: Env }>();
+const auth = new Hono<AppType>();
 
-function getBaseUrl(c: Context<{ Bindings: Env }>): string {
+function getBaseUrl(c: Context<AppType>): string {
   const url = new URL(c.req.url);
   return `${url.protocol}//${url.host}`;
 }
 
-function getGitHubProvider(c: Context<{ Bindings: Env }>) {
+function getGitHubProvider(c: Context<AppType>) {
   const base = getBaseUrl(c);
   return new GitHub(c.env.GITHUB_CLIENT_ID, c.env.GITHUB_CLIENT_SECRET, `${base}/api/auth/github/callback`);
 }
 
-// GitHub OAuth
 auth.get('/github/start', async (c) => {
   const github = getGitHubProvider(c);
   const state = generateId('gh');
@@ -93,7 +95,6 @@ auth.get('/github/callback', async (c) => {
   }
 });
 
-// Google OAuth (simple code flow, no PKCE needed for server-side)
 auth.get('/google/start', async (c) => {
   const base = getBaseUrl(c);
   const state = generateId('go');
@@ -128,14 +129,12 @@ auth.get('/google/callback', async (c) => {
     const tokenData = await tokenRes.json() as TokenResponse;
     if (tokenData.error) throw new Error(`${tokenData.error}: ${tokenData.error_description || ''}`);
 
-    // Try JWT decode with fallback
     let payload: GoogleIdPayload;
     try {
-      const idParts = tokenData.id_token.split('.');
+      const idParts = tokenData.id_token!.split('.');
       payload = JSON.parse(atob(idParts[1]));
     } catch {
-      // Node/Workers fallback
-      const idParts = tokenData.id_token.split('.');
+      const idParts = tokenData.id_token!.split('.');
       const decoded = Buffer.from(idParts[1], 'base64').toString();
       payload = JSON.parse(decoded);
     }
@@ -148,42 +147,72 @@ auth.get('/google/callback', async (c) => {
   }
 });
 
-// Refresh & logout
 auth.post('/refresh', requireAuth, async (c) => {
   const refreshToken = c.req.header('X-Refresh-Token');
   if (!refreshToken) return c.json({ success: false, error: '缺少刷新令牌' }, 400);
   const hash = await hashToken(refreshToken);
-  const session = await c.env.DB.prepare(
-    'SELECT * FROM auth_sessions WHERE refresh_token_hash = ? AND revoked_at IS NULL AND expires_at > datetime("now")'
-  ).bind(hash).first<{ id: number; user_id: number }>();
+  const db = createDb(c.env.DB);
+
+  const session = await db.select()
+    .from(authSessions)
+    .where(and(
+      eq(authSessions.refreshTokenHash, hash),
+      sql`${authSessions.revokedAt} IS NULL`,
+      sql`${authSessions.expiresAt} > datetime('now')`,
+    ))
+    .get();
   if (!session) return c.json({ success: false, error: '刷新令牌无效或已过期' }, 401);
-  const user = await c.env.DB.prepare('SELECT public_id, role FROM users WHERE id = ?').bind(session.user_id).first<{ public_id: string; role: 'user' | 'admin' }>();
+
+  const user = await db.select({ public_id: users.publicId, role: users.role })
+    .from(users)
+    .where(eq(users.id, session.userId))
+    .get();
   if (!user) return c.json({ success: false, error: '用户不存在' }, 401);
+
   const accessToken = await signAccessToken(c.env, { sub: user.public_id, sid: String(session.id), role: user.role });
   const newRefreshToken = generateRefreshToken();
   const newHash = await hashToken(newRefreshToken);
   const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-  await c.env.DB.prepare("UPDATE auth_sessions SET revoked_at = datetime('now') WHERE id = ?").bind(session.id).run();
-  await c.env.DB.prepare('INSERT INTO auth_sessions (user_id, refresh_token_hash, expires_at) VALUES (?, ?, ?)').bind(session.user_id, newHash, expiresAt).run();
+
+  await db.batch([
+    db.update(authSessions).set({ revokedAt: sql`datetime('now')` }).where(eq(authSessions.id, session.id)),
+    db.insert(authSessions).values({ userId: session.userId, refreshTokenHash: newHash, expiresAt }),
+  ]);
+
   return c.json({ success: true, data: { access_token: accessToken, refresh_token: newRefreshToken } });
 });
 
 auth.post('/logout', requireAuth, async (c) => {
-  const userId = c.get('userId');
-  const user = await c.env.DB.prepare('SELECT id FROM users WHERE public_id = ?').bind(userId).first<{ id: number }>();
-  if (user) await c.env.DB.prepare("UPDATE auth_sessions SET revoked_at = datetime('now') WHERE user_id = ? AND revoked_at IS NULL").bind(user.id).run();
+  const userId = c.get('userId')!;
+  const db = createDb(c.env.DB);
+  const user = await db.select({ id: users.id })
+    .from(users)
+    .where(eq(users.publicId, userId))
+    .get();
+  if (user) {
+    await db.update(authSessions)
+      .set({ revokedAt: sql`datetime('now')` })
+      .where(and(eq(authSessions.userId, user.id), sql`${authSessions.revokedAt} IS NULL`))
+      .run();
+  }
   return c.json({ success: true });
 });
 
-// Dev login
 auth.post('/dev-login', async (c) => {
   try {
     const body = await c.req.json<{ key: string }>();
     if (body.key !== c.env.ADMIN_API_KEY) return c.json({ success: false, error: '无效的管理员密钥' }, 403);
-    let user = await c.env.DB.prepare('SELECT public_id, role FROM users WHERE role = ? LIMIT 1').bind('admin').first<{ public_id: string; role: 'admin' }>();
+    const db = createDb(c.env.DB);
+
+    let user = await db.select({ public_id: users.publicId, role: users.role })
+      .from(users)
+      .where(eq(users.role, 'admin'))
+      .limit(1)
+      .get();
+
     if (!user) {
       const publicId = generateId('u');
-      await c.env.DB.prepare('INSERT INTO users (public_id, nickname, role) VALUES (?, ?, ?)').bind(publicId, 'admin', 'admin').run();
+      await db.insert(users).values({ publicId, nickname: 'admin', role: 'admin' }).run();
       user = { public_id: publicId, role: 'admin' };
     }
     const tokens = await createSession(c.env, user);
@@ -192,20 +221,34 @@ auth.post('/dev-login', async (c) => {
 });
 
 async function findOrCreateUser(env: Env, provider: 'github' | 'google', providerUserId: string, email: string | null, login: string, avatarUrl: string): Promise<{ public_id: string; role: 'user' | 'admin' }> {
-  const existing = await env.DB.prepare(
-    'SELECT u.id, u.public_id, u.role FROM users u JOIN oauth_accounts oa ON u.id = oa.user_id WHERE oa.provider = ? AND oa.provider_user_id = ?'
-  ).bind(provider, providerUserId).first<{ id: number; public_id: string; role: 'user' | 'admin' }>();
+  const db = createDb(env.DB);
+  const existing = await db.select({ id: users.id, public_id: users.publicId, role: users.role })
+    .from(users)
+    .innerJoin(oauthAccounts, eq(users.id, oauthAccounts.userId))
+    .where(and(eq(oauthAccounts.provider, provider), eq(oauthAccounts.providerUserId, providerUserId)))
+    .get();
+
   if (existing) {
-    await env.DB.prepare("UPDATE oauth_accounts SET last_login_at = datetime('now'), provider_email = COALESCE(?, provider_email), provider_login = ? WHERE provider = ? AND provider_user_id = ?").bind(email, login, provider, providerUserId).run();
-    await env.DB.prepare("UPDATE users SET updated_at = datetime('now'), avatar_url = COALESCE(NULLIF(?, ''), avatar_url) WHERE id = ?").bind(avatarUrl, existing.id).run();
+    await db.batch([
+      db.update(oauthAccounts).set({
+        lastLoginAt: sql`datetime('now')`,
+        providerEmail: sql`COALESCE(${email}, ${oauthAccounts.providerEmail})`,
+        providerLogin: login,
+      }).where(and(eq(oauthAccounts.provider, provider), eq(oauthAccounts.providerUserId, providerUserId))),
+      db.update(users).set({
+        updatedAt: sql`datetime('now')`,
+        avatarUrl: sql`COALESCE(NULLIF(${avatarUrl}, ''), ${users.avatarUrl})`,
+      }).where(eq(users.id, existing.id)),
+    ]);
     return { public_id: existing.public_id, role: existing.role };
   }
+
   const publicId = generateId('u');
   const nickname = login || email?.split('@')[0] || '用户';
-  const result = await env.DB.prepare('INSERT INTO users (public_id, nickname, avatar_url) VALUES (?, ?, ?)').bind(publicId, nickname, avatarUrl || null).run();
+  const result = await db.insert(users).values({ publicId, nickname, avatarUrl: avatarUrl || null }).run();
   const userId = result.meta?.last_row_id;
   if (!userId) throw new Error('Failed to create user');
-  await env.DB.prepare('INSERT INTO oauth_accounts (user_id, provider, provider_user_id, provider_email, provider_login) VALUES (?, ?, ?, ?, ?)').bind(userId, provider, providerUserId, email, login).run();
+  await db.insert(oauthAccounts).values({ userId, provider, providerUserId, providerEmail: email, providerLogin: login }).run();
   return { public_id: publicId, role: 'user' };
 }
 
@@ -214,8 +257,12 @@ async function createSession(env: Env, user: { public_id: string; role: 'user' |
   const refreshToken = generateRefreshToken();
   const hash = await hashToken(refreshToken);
   const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-  const userRow = await env.DB.prepare('SELECT id FROM users WHERE public_id = ?').bind(user.public_id).first<{ id: number }>();
-  await env.DB.prepare('INSERT INTO auth_sessions (user_id, refresh_token_hash, expires_at) VALUES (?, ?, ?)').bind(userRow!.id, hash, expiresAt).run();
+  const db = createDb(env.DB);
+  const userRow = await db.select({ id: users.id })
+    .from(users)
+    .where(eq(users.publicId, user.public_id))
+    .get();
+  await db.insert(authSessions).values({ userId: userRow!.id, refreshTokenHash: hash, expiresAt }).run();
   return { access_token: accessToken, refresh_token: refreshToken };
 }
 

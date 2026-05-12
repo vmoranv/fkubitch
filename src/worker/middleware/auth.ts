@@ -1,8 +1,10 @@
 import type { Context, Next } from 'hono';
-import type { Env } from '../types';
+import type { AppType } from '../types';
 import { verifyAccessToken } from '../services/session';
 
-export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) {
+type C = Context<AppType>;
+
+export async function authMiddleware(c: C, next: Next) {
   const authHeader = c.req.header('Authorization');
   const cookieToken = c.req.header('Cookie')?.match(/access_token=([^;]+)/)?.[1];
 
@@ -25,7 +27,7 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) 
   await next();
 }
 
-export async function requireAuth(c: Context<{ Bindings: Env }>, next: Next) {
+export async function requireAuth(c: C, next: Next) {
   const userId = c.get('userId');
   if (!userId) {
     return c.json({ success: false, error: '请先登录' }, 401);
@@ -33,7 +35,7 @@ export async function requireAuth(c: Context<{ Bindings: Env }>, next: Next) {
   await next();
 }
 
-export async function requireAdmin(c: Context<{ Bindings: Env }>, next: Next) {
+export async function requireAdmin(c: C, next: Next) {
   const role = c.get('userRole');
   if (role !== 'admin') {
     return c.json({ success: false, error: '需要管理员权限' }, 403);

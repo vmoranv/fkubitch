@@ -1,42 +1,56 @@
 import { Hono } from 'hono';
-import type { Env } from '../types';
+import type { AppType } from '../types';
+import { createDb } from '../db';
+import { users, modelResults } from '../db/schema';
+import { sql } from 'drizzle-orm';
 
-const leaderboard = new Hono<{ Bindings: Env }>();
+const leaderboard = new Hono<AppType>();
 
-// 人类排行榜
 leaderboard.get('/', async (c) => {
   const limit = Math.min(parseInt(c.req.query('limit') || '10'), 10);
+  const db = createDb(c.env.DB);
 
-  const result = await c.env.DB.prepare(
-    `SELECT public_id as user_id, nickname, avatar_url, total_score as score
-     FROM users ORDER BY total_score DESC LIMIT ?`
-  ).bind(limit).all();
+  const rows = await db.select({
+    user_id: users.publicId,
+    nickname: users.nickname,
+    avatar_url: users.avatarUrl,
+    score: users.totalScore,
+  })
+    .from(users)
+    .orderBy(sql`${users.totalScore} DESC`)
+    .limit(limit)
+    .all();
 
   return c.json({
     success: true,
-    data: result.results.map((row: Record<string, unknown>, i: number) => ({ rank: i + 1, ...row })),
+    data: rows.map((row, i) => ({ rank: i + 1, ...row })),
   });
 });
 
-// LLM 排行榜
 leaderboard.get('/models', async (c) => {
   const limit = Math.min(parseInt(c.req.query('limit') || '10'), 10);
+  const db = createDb(c.env.DB);
 
-  const result = await c.env.DB.prepare(
-    `SELECT provider, model_name, AVG(score_total) as avg_score, COUNT(*) as runs,
-            MAX(score_total) as best_score
-     FROM model_results
-     GROUP BY provider, model_name
-     ORDER BY avg_score DESC LIMIT ?`
-  ).bind(limit).all();
+  const rows = await db.select({
+    provider: modelResults.provider,
+    model_name: modelResults.modelName,
+    avg_score: sql<number>`cast(avg(${modelResults.scoreTotal}) as int)`,
+    runs: sql<number>`cast(count(*) as int)`,
+    best_score: sql<number>`max(${modelResults.scoreTotal})`,
+  })
+    .from(modelResults)
+    .groupBy(modelResults.provider, modelResults.modelName)
+    .orderBy(sql`avg(${modelResults.scoreTotal}) DESC`)
+    .limit(limit)
+    .all();
 
   return c.json({
     success: true,
-    data: result.results.map((row: Record<string, unknown>, i: number) => ({
+    data: rows.map((row, i) => ({
       rank: i + 1,
       provider: row.provider,
       model_name: row.model_name,
-      avg_score: Math.round(row.avg_score as number),
+      avg_score: row.avg_score,
       best_score: row.best_score,
       runs: row.runs,
     })),
