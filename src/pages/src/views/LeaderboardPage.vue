@@ -11,7 +11,7 @@ const loading = ref(true);
 
 async function load() {
   loading.value = true;
-  const r = await useApi<LeaderboardEntry[]>(`/leaderboard?period=${period.value}&limit=50`);
+  const r = await useApi<LeaderboardEntry[]>(`/leaderboard?period=${period.value}`);
   entries.value = r.success ? r.data || [] : [];
   loading.value = false;
 }
@@ -19,8 +19,8 @@ onMounted(load);
 </script>
 
 <template>
-  <div class="space-y-4">
-    <h1 class="text-xl font-black flex items-center gap-2 stagger-1"><Trophy class="w-5 h-5 text-ph-gold" />排行榜</h1>
+  <div class="max-w-xl mx-auto w-full space-y-4">
+    <h1 class="text-xl font-black flex items-center gap-2 stagger-1"><Trophy class="w-5 h-5 text-ph-gold" />排行榜 <span class="text-11px text-ph-muted font-normal">TOP 10</span></h1>
     <div class="flex gap-1 stagger-2">
       <button v-for="p in [{k:'all',l:'总榜'},{k:'weekly',l:'周榜'},{k:'daily',l:'日榜'}] as const" :key="p.k"
         :class="period===p.k?'btn-primary text-11px':'btn-ghost text-11px'" @click="period=p.k;load()">{{ p.l }}</button>
