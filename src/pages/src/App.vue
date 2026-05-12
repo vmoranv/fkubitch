@@ -6,7 +6,7 @@ const auth = useAuthStore();
 </script>
 
 <template>
-  <div class="min-h-screen flex flex-col bg-ph-black text-ph-text">
+  <div class="min-h-[100dvh] flex flex-col bg-ph-black text-ph-text">
     <AppHeader />
     <main class="flex-1 w-full container-main py-8 sm:py-12 flex flex-col items-center">
       <router-view v-slot="{ Component }">
@@ -18,9 +18,7 @@ const auth = useAuthStore();
     <footer class="text-center py-4 text-11px text-ph-muted border-t border-ph-border mt-auto">
       <p>© 2026 fuckubitch</p>
     </footer>
-    <Transition name="modal">
-      <LoginModal v-if="auth.showLoginModal" />
-    </Transition>
+    <LoginModal v-if="auth.showLoginModal" />
   </div>
 </template>
 
