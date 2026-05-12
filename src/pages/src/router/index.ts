@@ -39,4 +39,10 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('@/views/AuthCallbackPage.vue'),
     meta: { guest: true },
   },
+  {
+    path: '/admin',
+    name: 'admin',
+    component: () => import('@/views/AdminPage.vue'),
+    meta: { guest: false, admin: true },
+  },
 ];
