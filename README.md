@@ -15,6 +15,15 @@ pnpm setup   # install deps + init db
 pnpm dev     # start worker + vite
 ```
 
+## Deploy
+
+```bash
+cp wrangler.toml.example wrangler.toml   # fill in your D1 ID + secrets
+pnpm db:migrate --remote && pnpm db:seed --remote
+pnpm deploy
+pnpm pages:build && npx wrangler pages deploy src/pages/dist
+```
+
 ## Stack
 
 Vue 3 / Vite / Pinia / UnoCSS — Hono / Cloudflare Workers / D1 — GitHub & Google OAuth
