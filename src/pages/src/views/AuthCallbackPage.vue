@@ -1,17 +1,19 @@
 <script setup lang="ts">
 import { onMounted } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRouter } from 'vue-router';
 import { useAuth } from '@/composables/useAuth';
 import { Loader2 } from 'lucide-vue-next';
 
-const route = useRoute();
+
 const router = useRouter();
 const { handleCallback } = useAuth();
 
 onMounted(async () => {
-  const params = new URLSearchParams(window.location.hash.replace('#', '?'));
-  const token = params.get('access_token') || route.query.access_token as string;
-  const refresh = params.get('refresh_token') || route.query.refresh_token as string;
+  const hash = window.location.hash.replace('#', '');
+  const qs = hash.includes('?') ? hash.split('?')[1] : '';
+  const params = new URLSearchParams(qs);
+  const token = params.get('access_token');
+  const refresh = params.get('refresh_token');
   if (token && refresh) { await handleCallback(token, refresh); router.push('/'); }
   else { router.push('/?error=auth_failed'); }
 });
