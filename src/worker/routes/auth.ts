@@ -33,11 +33,6 @@ interface GoogleIdPayload {
   exp: number;
 }
 
-interface TokenError {
-  error: string;
-  error_description?: string;
-}
-
 interface TokenResponse {
   access_token?: string;
   id_token?: string;
@@ -77,7 +72,7 @@ auth.get('/github/start', async (c) => {
   }
   const github = getGitHubProvider(c);
   const state = generateId('gh');
-  const url = await github.createAuthorizationURL(state, { scopes: ['read:user', 'user:email'] });
+  const url = github.createAuthorizationURL(state, ['read:user', 'user:email']);
   return c.redirect(url.toString());
 });
 
@@ -109,7 +104,8 @@ auth.get('/github/callback', async (c) => {
     const session = await createSession(c.env, user);
     return c.redirect(`${frontend}/#/auth/callback?access_token=${encodeURIComponent(session.access_token)}&refresh_token=${encodeURIComponent(session.refresh_token)}`);
   } catch (e) {
-    return c.redirect(`${frontend}/#/?error=${encodeURIComponent(e.message || 'github_failed')}`);
+    const msg = e instanceof Error ? e.message : 'github_failed';
+    return c.redirect(`${frontend}/#/?error=${encodeURIComponent(msg)}`);
   }
 });
 
@@ -149,22 +145,20 @@ auth.get('/google/callback', async (c) => {
     });
     const tokenData = await tokenRes.json() as TokenResponse;
     if (tokenData.error) throw new Error(`${tokenData.error}: ${tokenData.error_description || ''}`);
+    if (!tokenData.id_token) throw new Error('Missing id_token');
 
-    let payload: GoogleIdPayload;
-    try {
-      const idParts = tokenData.id_token!.split('.');
-      payload = JSON.parse(atob(idParts[1]));
-    } catch {
-      const idParts = tokenData.id_token!.split('.');
-      const decoded = Buffer.from(idParts[1], 'base64').toString();
-      payload = JSON.parse(decoded);
-    }
+    const idParts = tokenData.id_token.split('.');
+    if (idParts.length !== 3) throw new Error('Invalid Google ID token');
+    let b64 = idParts[1].replace(/-/g, '+').replace(/_/g, '/');
+    while (b64.length % 4) b64 += '=';
+    const payload: GoogleIdPayload = JSON.parse(atob(b64));
 
     const user = await findOrCreateUser(c.env, 'google', payload.sub, payload.email || null, payload.name || 'Google User', payload.picture || '');
     const session = await createSession(c.env, user);
     return c.redirect(`${frontend}/#/auth/callback?access_token=${encodeURIComponent(session.access_token)}&refresh_token=${encodeURIComponent(session.refresh_token)}`);
   } catch (e) {
-    return c.redirect(`${frontend}/#/?error=${encodeURIComponent(e.message || 'google_failed')}`);
+    const msg = e instanceof Error ? e.message : 'google_failed';
+    return c.redirect(`${frontend}/#/?error=${encodeURIComponent(msg)}`);
   }
 });
 

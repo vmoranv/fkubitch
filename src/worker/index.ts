@@ -7,7 +7,6 @@ import userRoutes from './routes/users';
 import adminRoutes from './routes/admin';
 import { authMiddleware } from './middleware/auth';
 import { corsMiddleware, securityHeaders } from './middleware/validation';
-import { rateLimit } from './middleware/rate-limit';
 
 const app = new Hono<AppType>();
 

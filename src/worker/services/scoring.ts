@@ -50,7 +50,6 @@ export function scoreSubmission(
   const missed = stdPositions.length - matched.length;
 
   // Score: base on matched positions, penalize extras and misses
-  const total = Math.max(stdPositions.length, userPositions.length);
   const scoreSegment = stdPositions.length > 0
     ? Math.round(1000 * (matched.length / stdPositions.length))
     : (userPositions.length === 0 ? 1000 : 500);
