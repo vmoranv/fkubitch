@@ -8,8 +8,8 @@
     "dev:worker": "npx wrangler dev --local",
     "dev:pages": "cd src/pages && npx vite",
     "deploy": "npx wrangler deploy",
-    "db:init": "npx drizzle-kit generate && npx wrangler d1 migrations apply temp --local && npx wrangler d1 execute temp --local --file=src/worker/db/seed.sql",
-    "db:init:remote": "npx drizzle-kit generate && npx wrangler d1 migrations apply temp --remote && npx wrangler d1 execute temp --remote --file=src/worker/db/seed.sql",
+    "db:init": "npx drizzle-kit generate && npx wrangler d1 migrations apply fub --local && npx wrangler d1 execute fub --local --file=src/worker/db/seed.sql",
+    "db:init:remote": "npx drizzle-kit generate && npx wrangler d1 migrations apply fub --remote && npx wrangler d1 execute fub --remote --file=src/worker/db/seed.sql",
     "db:studio": "npx drizzle-kit studio",
     "pages:build": "cd src/pages && pnpm build",
     "setup": "pnpm install && cd src/pages && pnpm install && pnpm db:init"
