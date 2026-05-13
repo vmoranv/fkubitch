@@ -26,20 +26,28 @@ watch(() => store.currentChallenge, (c) => {
 
 watch(segmentedText, (v) => store.syncFromEditor(v));
 
-const submitDisabled = computed(() =>
-  // Guests bypass Turnstile here — the click handler opens the login modal
-  // instead of submitting, so the button must stay clickable to surface it.
-  store.isSubmitting || (!auth.isGuest && turnstileEnabled.value && !turnstileToken.value)
-);
+const submitDisabled = computed(() => store.isSubmitting);
+
+async function getTurnstileToken(): Promise<string> {
+  if (!turnstileEnabled.value || auth.isGuest) return '';
+  // Prefer the reactive ref (populated by widget callback) but fall back to
+  // reading the hidden input directly. Turnstile writes the response token to
+  // <input name="cf-turnstile-response"> regardless of whether our Vue emit
+  // chain worked, so this is always authoritative.
+  if (turnstileToken.value) return turnstileToken.value;
+  const el = document.querySelector<HTMLInputElement>('input[name="cf-turnstile-response"]');
+  return el?.value || '';
+}
 
 async function handleSubmit() {
   if (auth.isGuest) { auth.openLogin(); return; }
-  if (turnstileEnabled.value && !turnstileToken.value) {
+  const token = await getTurnstileToken();
+  if (turnstileEnabled.value && !token) {
     message.value = '请先完成人机验证'; messageType.value = 'error';
     return;
   }
   message.value = '提交中...'; messageType.value = '';
-  const r = await submitForScore(turnstileToken.value);
+  const r = await submitForScore(token);
   if (r) { message.value = `得分 ${r.score_total}`; messageType.value = 'success'; }
   else { message.value = '提交失败'; messageType.value = 'error'; }
   // Turnstile token is single-use; clear so the widget re-issues a fresh one.
