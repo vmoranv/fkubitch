@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useAuthStore } from '@/stores/auth';
 
 const props = defineProps<{
@@ -23,7 +23,7 @@ declare global {
   }
 }
 
-function tryRender() {
+function render() {
   if (!siteKey.value || !containerRef.value || widgetId.value) return;
   if (!window.turnstile) return;
   widgetId.value = window.turnstile.render(containerRef.value, {
@@ -35,20 +35,15 @@ function tryRender() {
   });
 }
 
-// Site key arrives async from /api/auth/config; render once it lands.
-// The script tag in index.html may also still be loading — poll briefly.
-// flush:'post' ensures containerRef is bound to the v-if'd div before we
-// look at it; otherwise watch fires during setup() when the DOM patch
-// hasn't run yet and containerRef.value is still null.
-watch(siteKey, () => {
+onMounted(() => {
   if (!siteKey.value) return;
-  if (window.turnstile) { tryRender(); return; }
+  if (window.turnstile) { render(); return; }
+  // Script is ?render=explicit so it won't auto-render; wait for it to load.
   const id = setInterval(() => {
-    if (window.turnstile) { clearInterval(id); tryRender(); }
+    if (window.turnstile) { clearInterval(id); render(); }
   }, 200);
-  // Stop polling after 10s no matter what.
   setTimeout(() => clearInterval(id), 10_000);
-}, { immediate: true, flush: 'post' });
+});
 
 watch(() => props.modelValue, (v) => {
   if (!v && widgetId.value && window.turnstile) {
