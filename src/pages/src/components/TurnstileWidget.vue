@@ -37,6 +37,9 @@ function tryRender() {
 
 // Site key arrives async from /api/auth/config; render once it lands.
 // The script tag in index.html may also still be loading — poll briefly.
+// flush:'post' ensures containerRef is bound to the v-if'd div before we
+// look at it; otherwise watch fires during setup() when the DOM patch
+// hasn't run yet and containerRef.value is still null.
 watch(siteKey, () => {
   if (!siteKey.value) return;
   if (window.turnstile) { tryRender(); return; }
@@ -45,7 +48,7 @@ watch(siteKey, () => {
   }, 200);
   // Stop polling after 10s no matter what.
   setTimeout(() => clearInterval(id), 10_000);
-}, { immediate: true });
+}, { immediate: true, flush: 'post' });
 
 watch(() => props.modelValue, (v) => {
   if (!v && widgetId.value && window.turnstile) {
