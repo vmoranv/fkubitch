@@ -12,6 +12,7 @@ export const useAuthStore = defineStore('auth', () => {
   const refreshToken = ref<string | null>(localStorage.getItem(REFRESH_TOKEN_KEY));
   const showLoginModal = ref(false);
   const providers = ref<{ github: boolean; google: boolean }>({ github: false, google: false });
+  const turnstileSiteKey = ref('');
 
   const isGuest = computed(() => !user.value && !accessToken.value);
   const isLoggedIn = computed(() => !!user.value || !!accessToken.value);
@@ -46,6 +47,10 @@ export const useAuthStore = defineStore('auth', () => {
     providers.value = p;
   }
 
+  function setTurnstileSiteKey(k: string) {
+    turnstileSiteKey.value = k;
+  }
+
   function logout() {
     user.value = null;
     clearTokens();
@@ -65,6 +70,7 @@ export const useAuthStore = defineStore('auth', () => {
     refreshToken,
     showLoginModal,
     providers,
+    turnstileSiteKey,
     isGuest,
     isLoggedIn,
     guestId,
@@ -72,6 +78,7 @@ export const useAuthStore = defineStore('auth', () => {
     clearTokens,
     setUser,
     setProviders,
+    setTurnstileSiteKey,
     logout,
     openLogin,
     closeLogin,

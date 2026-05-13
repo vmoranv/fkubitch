@@ -25,9 +25,12 @@ if (auth.accessToken && !auth.user) {
   });
 }
 
-// Load enabled OAuth providers (cached at edge for 1h)
-useApi<{ github: boolean; google: boolean }>('/auth/config').then(r => {
-  if (r.success && r.data) auth.setProviders(r.data);
+// Load enabled OAuth providers + Turnstile site key (cached at edge for 1h)
+useApi<{ github: boolean; google: boolean; turnstile_site_key?: string }>('/auth/config').then(r => {
+  if (r.success && r.data) {
+    auth.setProviders({ github: r.data.github, google: r.data.google });
+    auth.setTurnstileSiteKey(r.data.turnstile_site_key || '');
+  }
 });
 
 // Navigation guard: guest can't access meta.guest:false routes, admin routes require role

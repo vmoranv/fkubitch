@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { ref, watch, computed } from 'vue';
 import { useChallengeStore } from '@/stores/challenge';
 import { useAuthStore } from '@/stores/auth';
 import { useSegment } from '@/composables/useSegment';
 import GapEditor from './GapEditor.vue';
+import TurnstileWidget from './TurnstileWidget.vue';
 import { Trash2, Undo2, SendHorizonal } from 'lucide-vue-next';
 
 const store = useChallengeStore();
@@ -13,6 +14,8 @@ const { submitForScore } = useSegment();
 const message = ref('');
 const messageType = ref<'success' | 'error' | ''>('');
 const editorRef = ref<InstanceType<typeof GapEditor> | null>(null);
+const turnstileToken = ref('');
+const turnstileEnabled = computed(() => !!auth.turnstileSiteKey);
 
 const rawText = ref(store.currentChallenge?.raw_text || '');
 const segmentedText = ref(store.currentChallenge?.raw_text || '');
@@ -23,12 +26,22 @@ watch(() => store.currentChallenge, (c) => {
 
 watch(segmentedText, (v) => store.syncFromEditor(v));
 
+const submitDisabled = computed(() =>
+  store.isSubmitting || (turnstileEnabled.value && !turnstileToken.value)
+);
+
 async function handleSubmit() {
   if (auth.isGuest) { auth.openLogin(); return; }
+  if (turnstileEnabled.value && !turnstileToken.value) {
+    message.value = '请先完成人机验证'; messageType.value = 'error';
+    return;
+  }
   message.value = '提交中...'; messageType.value = '';
-  const r = await submitForScore('test');
+  const r = await submitForScore(turnstileToken.value);
   if (r) { message.value = `得分 ${r.score_total}`; messageType.value = 'success'; }
   else { message.value = '提交失败'; messageType.value = 'error'; }
+  // Turnstile token is single-use; clear so the widget re-issues a fresh one.
+  turnstileToken.value = '';
   setTimeout(() => message.value = '', 4000);
 }
 </script>
@@ -37,10 +50,12 @@ async function handleSubmit() {
   <div class="space-y-4 stagger-1" v-if="store.currentChallenge">
     <GapEditor ref="editorRef" :raw-text="rawText" v-model="segmentedText" />
 
+    <TurnstileWidget v-if="!auth.isGuest" v-model="turnstileToken" />
+
     <div class="flex justify-center gap-2 flex-wrap">
       <button @click="editorRef?.clear()" class="btn-ghost text-11px"><Trash2 class="w-3 h-3" />清空</button>
       <button @click="editorRef?.undo()" class="btn-ghost text-11px"><Undo2 class="w-3 h-3" />撤销</button>
-      <button @click="handleSubmit" :disabled="store.isSubmitting" class="btn-primary text-11px"><SendHorizonal class="w-3 h-3" />提交</button>
+      <button @click="handleSubmit" :disabled="submitDisabled" class="btn-primary text-11px"><SendHorizonal class="w-3 h-3" />提交</button>
     </div>
 
     <Transition name="fade">
