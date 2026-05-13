@@ -25,6 +25,11 @@ if (auth.accessToken && !auth.user) {
   });
 }
 
+// Load enabled OAuth providers (cached at edge for 1h)
+useApi<{ github: boolean; google: boolean }>('/auth/config').then(r => {
+  if (r.success && r.data) auth.setProviders(r.data);
+});
+
 // Navigation guard: guest can't access meta.guest:false routes, admin routes require role
 router.beforeEach((to, from) => {
   const auth = useAuthStore();

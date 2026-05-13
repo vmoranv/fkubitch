@@ -4,6 +4,7 @@ import type { AppType, Env } from '../types';
 import { generateId } from '../utils';
 import { signAccessToken, generateRefreshToken, hashToken } from '../services/session';
 import { requireAuth } from '../middleware/auth';
+import { edgeCache } from '../middleware/cache';
 import { GitHub } from 'arctic';
 import { createDb } from '../db';
 import { users, oauthAccounts, authSessions } from '../db/schema';
@@ -56,7 +57,24 @@ function getGitHubProvider(c: Context<AppType>) {
   return new GitHub(c.env.GITHUB_CLIENT_ID, c.env.GITHUB_CLIENT_SECRET, `${base}/api/auth/github/callback`);
 }
 
+function isConfigured(value: string | undefined): boolean {
+  return !!value && value !== 'dev';
+}
+
+auth.get('/config', edgeCache({ cacheName: 'auth-config', maxAge: 3600, swr: 86400 }), (c) => {
+  return c.json({
+    success: true,
+    data: {
+      github: isConfigured(c.env.GITHUB_CLIENT_ID),
+      google: isConfigured(c.env.GOOGLE_CLIENT_ID),
+    },
+  });
+});
+
 auth.get('/github/start', async (c) => {
+  if (!isConfigured(c.env.GITHUB_CLIENT_ID)) {
+    return c.json({ success: false, error: 'GitHub 登录未配置' }, 404);
+  }
   const github = getGitHubProvider(c);
   const state = generateId('gh');
   const url = await github.createAuthorizationURL(state, { scopes: ['read:user', 'user:email'] });
@@ -96,7 +114,7 @@ auth.get('/github/callback', async (c) => {
 });
 
 auth.get('/google/start', async (c) => {
-  if (!c.env.GOOGLE_CLIENT_ID || c.env.GOOGLE_CLIENT_ID === 'dev') {
+  if (!isConfigured(c.env.GOOGLE_CLIENT_ID)) {
     return c.json({ success: false, error: 'Google 登录未配置' }, 404);
   }
   const base = getBaseUrl(c);

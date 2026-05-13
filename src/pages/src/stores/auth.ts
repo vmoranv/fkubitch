@@ -11,6 +11,7 @@ export const useAuthStore = defineStore('auth', () => {
   const accessToken = ref<string | null>(localStorage.getItem(ACCESS_TOKEN_KEY));
   const refreshToken = ref<string | null>(localStorage.getItem(REFRESH_TOKEN_KEY));
   const showLoginModal = ref(false);
+  const providers = ref<{ github: boolean; google: boolean }>({ github: false, google: false });
 
   const isGuest = computed(() => !user.value && !accessToken.value);
   const isLoggedIn = computed(() => !!user.value || !!accessToken.value);
@@ -41,6 +42,10 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = u;
   }
 
+  function setProviders(p: { github: boolean; google: boolean }) {
+    providers.value = p;
+  }
+
   function logout() {
     user.value = null;
     clearTokens();
@@ -59,12 +64,14 @@ export const useAuthStore = defineStore('auth', () => {
     accessToken,
     refreshToken,
     showLoginModal,
+    providers,
     isGuest,
     isLoggedIn,
     guestId,
     setTokens,
     clearTokens,
     setUser,
+    setProviders,
     logout,
     openLogin,
     closeLogin,

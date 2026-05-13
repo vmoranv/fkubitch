@@ -13,12 +13,13 @@ const { loginGitHub, loginGoogle } = useAuth();
         <h2 class="text-sm font-black uppercase tracking-wider text-center mb-1">登录</h2>
         <p class="text-11px text-ph-muted text-center mb-4">选择一种方式登录，积分永久保存</p>
         <div class="space-y-2">
-          <button @click="loginGitHub" class="w-full btn border border-ph-border hover:border-ph-gold/40 hover:bg-ph-surface flex items-center justify-center gap-2 py-3 text-ph-text text-xs font-bold uppercase tracking-wider">
+          <button v-if="auth.providers.github" @click="loginGitHub" class="w-full btn border border-ph-border hover:border-ph-gold/40 hover:bg-ph-surface flex items-center justify-center gap-2 py-3 text-ph-text text-xs font-bold uppercase tracking-wider">
             <Github class="w-4 h-4" /> GitHub
           </button>
-          <button @click="loginGoogle" class="w-full btn border border-ph-border hover:border-ph-gold/40 hover:bg-ph-surface flex items-center justify-center gap-2 py-3 text-ph-text text-xs font-bold uppercase tracking-wider">
+          <button v-if="auth.providers.google" @click="loginGoogle" class="w-full btn border border-ph-border hover:border-ph-gold/40 hover:bg-ph-surface flex items-center justify-center gap-2 py-3 text-ph-text text-xs font-bold uppercase tracking-wider">
             <Chrome class="w-4 h-4" /> Google
           </button>
+          <p v-if="!auth.providers.github && !auth.providers.google" class="text-11px text-ph-muted text-center py-4">暂无可用的登录方式</p>
         </div>
         <button @click="auth.closeLogin()" class="btn-ghost w-full mt-3 text-11px uppercase tracking-wider">游客模式</button>
       </div>
