@@ -159,16 +159,16 @@ auth.post('/refresh', requireAuth, async (c) => {
   const session = await db.select()
     .from(authSessions)
     .where(and(
-      eq(authSessions.refreshTokenHash, hash),
-      sql`${authSessions.revokedAt} IS NULL`,
-      sql`${authSessions.expiresAt} > datetime('now')`,
+      eq(authSessions.refresh_token_hash, hash),
+      sql`${authSessions.revoked_at} IS NULL`,
+      sql`${authSessions.expires_at} > datetime('now')`,
     ))
     .get();
   if (!session) return c.json({ success: false, error: '刷新令牌无效或已过期' }, 401);
 
-  const user = await db.select({ public_id: users.publicId, role: users.role })
+  const user = await db.select({ public_id: users.public_id, role: users.role })
     .from(users)
-    .where(eq(users.id, session.userId))
+    .where(eq(users.id, session.user_id))
     .get();
   if (!user) return c.json({ success: false, error: '用户不存在' }, 401);
 
@@ -178,8 +178,8 @@ auth.post('/refresh', requireAuth, async (c) => {
   const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
   await db.batch([
-    db.update(authSessions).set({ revokedAt: sql`datetime('now')` }).where(eq(authSessions.id, session.id)),
-    db.insert(authSessions).values({ userId: session.userId, refreshTokenHash: newHash, expiresAt }),
+    db.update(authSessions).set({ revoked_at: sql`datetime('now')` }).where(eq(authSessions.id, session.id)),
+    db.insert(authSessions).values({ user_id: session.user_id, refresh_token_hash: newHash, expires_at: expiresAt }),
   ]);
 
   return c.json({ success: true, data: { access_token: accessToken, refresh_token: newRefreshToken } });
@@ -190,12 +190,12 @@ auth.post('/logout', requireAuth, async (c) => {
   const db = createDb(c.env.DB);
   const user = await db.select({ id: users.id })
     .from(users)
-    .where(eq(users.publicId, userId))
+    .where(eq(users.public_id, userId))
     .get();
   if (user) {
     await db.update(authSessions)
-      .set({ revokedAt: sql`datetime('now')` })
-      .where(and(eq(authSessions.userId, user.id), sql`${authSessions.revokedAt} IS NULL`))
+      .set({ revoked_at: sql`datetime('now')` })
+      .where(and(eq(authSessions.user_id, user.id), sql`${authSessions.revoked_at} IS NULL`))
       .run();
   }
   return c.json({ success: true });
@@ -207,7 +207,7 @@ auth.post('/dev-login', async (c) => {
     if (body.key !== c.env.ADMIN_API_KEY) return c.json({ success: false, error: '无效的管理员密钥' }, 403);
     const db = createDb(c.env.DB);
 
-    let user = await db.select({ public_id: users.publicId, role: users.role })
+    let user = await db.select({ public_id: users.public_id, role: users.role })
       .from(users)
       .where(eq(users.role, 'admin'))
       .limit(1)
@@ -215,7 +215,7 @@ auth.post('/dev-login', async (c) => {
 
     if (!user) {
       const publicId = generateId('u');
-      await db.insert(users).values({ publicId, nickname: 'admin', role: 'admin' }).run();
+      await db.insert(users).values({ public_id: publicId, nickname: 'admin', role: 'admin' }).run();
       user = { public_id: publicId, role: 'admin' };
     }
     const tokens = await createSession(c.env, user);
@@ -223,24 +223,24 @@ auth.post('/dev-login', async (c) => {
   } catch (e) { return c.json({ success: false, error: String(e) }, 500); }
 });
 
-async function findOrCreateUser(env: Env, provider: 'github' | 'google', providerUserId: string, email: string | null, login: string, avatarUrl: string): Promise<{ public_id: string; role: 'user' | 'admin' }> {
+async function findOrCreateUser(env: Env, provider: 'github' | 'google', providerUserId: string, email: string | null, login: string, avatar_url: string): Promise<{ public_id: string; role: 'user' | 'admin' }> {
   const db = createDb(env.DB);
-  const existing = await db.select({ id: users.id, public_id: users.publicId, role: users.role })
+  const existing = await db.select({ id: users.id, public_id: users.public_id, role: users.role })
     .from(users)
-    .innerJoin(oauthAccounts, eq(users.id, oauthAccounts.userId))
-    .where(and(eq(oauthAccounts.provider, provider), eq(oauthAccounts.providerUserId, providerUserId)))
+    .innerJoin(oauthAccounts, eq(users.id, oauthAccounts.user_id))
+    .where(and(eq(oauthAccounts.provider, provider), eq(oauthAccounts.provider_user_id, providerUserId)))
     .get();
 
   if (existing) {
     await db.batch([
       db.update(oauthAccounts).set({
-        lastLoginAt: sql`datetime('now')`,
-        providerEmail: sql`COALESCE(${email}, ${oauthAccounts.providerEmail})`,
-        providerLogin: login,
-      }).where(and(eq(oauthAccounts.provider, provider), eq(oauthAccounts.providerUserId, providerUserId))),
+        last_login_at: sql`datetime('now')`,
+        provider_email: sql`COALESCE(${email}, ${oauthAccounts.provider_email})`,
+        provider_login: login,
+      }).where(and(eq(oauthAccounts.provider, provider), eq(oauthAccounts.provider_user_id, providerUserId))),
       db.update(users).set({
-        updatedAt: sql`datetime('now')`,
-        avatarUrl: sql`COALESCE(NULLIF(${avatarUrl}, ''), ${users.avatarUrl})`,
+        updated_at: sql`datetime('now')`,
+        avatar_url: sql`COALESCE(NULLIF(${avatar_url}, ''), ${users.avatar_url})`,
       }).where(eq(users.id, existing.id)),
     ]);
     return { public_id: existing.public_id, role: existing.role };
@@ -248,10 +248,10 @@ async function findOrCreateUser(env: Env, provider: 'github' | 'google', provide
 
   const publicId = generateId('u');
   const nickname = login || email?.split('@')[0] || '用户';
-  const result = await db.insert(users).values({ publicId, nickname, avatarUrl: avatarUrl || null }).run();
+  const result = await db.insert(users).values({ public_id: publicId, nickname, avatar_url: avatar_url || null }).run();
   const userId = result.meta?.last_row_id;
   if (!userId) throw new Error('Failed to create user');
-  await db.insert(oauthAccounts).values({ userId, provider, providerUserId, providerEmail: email, providerLogin: login }).run();
+  await db.insert(oauthAccounts).values({ user_id: userId, provider, provider_user_id: providerUserId, provider_email: email, provider_login: login }).run();
   return { public_id: publicId, role: 'user' };
 }
 
@@ -263,9 +263,9 @@ async function createSession(env: Env, user: { public_id: string; role: 'user' |
   const db = createDb(env.DB);
   const userRow = await db.select({ id: users.id })
     .from(users)
-    .where(eq(users.publicId, user.public_id))
+    .where(eq(users.public_id, user.public_id))
     .get();
-  await db.insert(authSessions).values({ userId: userRow!.id, refreshTokenHash: hash, expiresAt }).run();
+  await db.insert(authSessions).values({ user_id: userRow!.id, refresh_token_hash: hash, expires_at: expiresAt }).run();
   return { access_token: accessToken, refresh_token: refreshToken };
 }
 

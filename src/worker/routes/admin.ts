@@ -14,18 +14,18 @@ admin.get('/challenges', async (c) => {
   const result = await db.select({
     id: challenges.id,
     slug: challenges.slug,
-    rawText: challenges.rawText,
-    answerKeyJson: challenges.answerKeyJson,
+    raw_text: challenges.raw_text,
+    answer_key_json: challenges.answer_key_json,
     status: challenges.status,
-    submittedBy: challenges.submittedBy,
-    playCount: challenges.playCount,
-    createdAt: challenges.createdAt,
+    submitted_by: challenges.submitted_by,
+    play_count: challenges.play_count,
+    created_at: challenges.created_at,
     model_count: sql<number>`cast(count(${modelResults.id}) as int)`,
   })
     .from(challenges)
-    .leftJoin(modelResults, eq(challenges.id, modelResults.challengeId))
+    .leftJoin(modelResults, eq(challenges.id, modelResults.challenge_id))
     .groupBy(challenges.id)
-    .orderBy(desc(challenges.createdAt))
+    .orderBy(desc(challenges.created_at))
     .all();
 
   return c.json({ success: true, data: result });
@@ -40,8 +40,8 @@ admin.post('/challenges', async (c) => {
   const status = body.status || 'published';
   await db.insert(challenges).values({
     slug: body.slug,
-    rawText: body.raw_text,
-    answerKeyJson: body.answer_key_json,
+    raw_text: body.raw_text,
+    answer_key_json: body.answer_key_json,
     status: status as 'draft' | 'published' | 'archived' | 'pending',
   }).run();
   return c.json({ success: true, data: { slug: body.slug } });
@@ -51,8 +51,8 @@ admin.put('/challenges/:slug', async (c) => {
   const slug = c.req.param('slug');
   const body = await c.req.json<{ raw_text?: string; answer_key_json?: string; status?: string }>();
   const updates: Record<string, unknown> = {};
-  if (body.raw_text !== undefined) updates.rawText = body.raw_text;
-  if (body.answer_key_json !== undefined) updates.answerKeyJson = body.answer_key_json;
+  if (body.raw_text !== undefined) updates.raw_text = body.raw_text;
+  if (body.answer_key_json !== undefined) updates.answer_key_json = body.answer_key_json;
   if (body.status !== undefined) updates.status = body.status;
   if (Object.keys(updates).length === 0) return c.json({ success: false, error: '没有要更新的字段' }, 400);
   const db = createDb(c.env.DB);
@@ -71,18 +71,18 @@ admin.get('/pending', async (c) => {
   const result = await db.select({
     id: challenges.id,
     slug: challenges.slug,
-    rawText: challenges.rawText,
-    answerKeyJson: challenges.answerKeyJson,
+    raw_text: challenges.raw_text,
+    answer_key_json: challenges.answer_key_json,
     status: challenges.status,
-    submittedBy: challenges.submittedBy,
-    playCount: challenges.playCount,
-    createdAt: challenges.createdAt,
+    submitted_by: challenges.submitted_by,
+    play_count: challenges.play_count,
+    created_at: challenges.created_at,
     submitted_by_name: users.nickname,
   })
     .from(challenges)
-    .leftJoin(users, eq(challenges.submittedBy, users.id))
+    .leftJoin(users, eq(challenges.submitted_by, users.id))
     .where(eq(challenges.status, 'pending'))
-    .orderBy(desc(challenges.createdAt))
+    .orderBy(desc(challenges.created_at))
     .all();
   return c.json({ success: true, data: result });
 });
@@ -111,8 +111,8 @@ admin.get('/model-results/:slug', async (c) => {
 
   const results = await db.select()
     .from(modelResults)
-    .where(eq(modelResults.challengeId, challenge.id))
-    .orderBy(desc(modelResults.scoreTotal))
+    .where(eq(modelResults.challenge_id, challenge.id))
+    .orderBy(desc(modelResults.score_total))
     .all();
   return c.json({ success: true, data: results });
 });
@@ -127,31 +127,31 @@ admin.post('/model-results', async (c) => {
   const db = createDb(c.env.DB);
   const challenge = await db.select({
     id: challenges.id,
-    rawText: challenges.rawText,
-    answerKeyJson: challenges.answerKeyJson,
+    raw_text: challenges.raw_text,
+    answer_key_json: challenges.answer_key_json,
   })
     .from(challenges)
     .where(eq(challenges.slug, body.challenge_slug))
     .get();
   if (!challenge) return c.json({ success: false, error: '挑战不存在' }, 404);
 
-  const scores = scoreSubmission(challenge.rawText, body.segmented_text, challenge.answerKeyJson);
+  const scores = scoreSubmission(challenge.raw_text, body.segmented_text, challenge.answer_key_json);
   await db.insert(modelResults).values({
-    challengeId: challenge.id,
+    challenge_id: challenge.id,
     provider: body.provider,
-    modelName: body.model_name,
-    segmentedText: body.segmented_text,
-    scoreTotal: scores.score_total,
-    scoreSegment: scores.score_segment,
-    scorePenalty: scores.score_penalty,
+    model_name: body.model_name,
+    segmented_text: body.segmented_text,
+    score_total: scores.score_total,
+    score_segment: scores.score_segment,
+    score_penalty: scores.score_penalty,
   })
     .onConflictDoUpdate({
-      target: [modelResults.challengeId, modelResults.provider, modelResults.modelName],
+      target: [modelResults.challenge_id, modelResults.provider, modelResults.model_name],
       set: {
-        segmentedText: body.segmented_text,
-        scoreTotal: scores.score_total,
-        scoreSegment: scores.score_segment,
-        scorePenalty: scores.score_penalty,
+        segmented_text: body.segmented_text,
+        score_total: scores.score_total,
+        score_segment: scores.score_segment,
+        score_penalty: scores.score_penalty,
       },
     })
     .run();
@@ -171,20 +171,20 @@ admin.put('/model-results/:id', async (c) => {
   if (!row) return c.json({ success: false, error: '记录不存在' }, 404);
 
   const challenge = await db.select({
-    rawText: challenges.rawText,
-    answerKeyJson: challenges.answerKeyJson,
+    raw_text: challenges.raw_text,
+    answer_key_json: challenges.answer_key_json,
   })
     .from(challenges)
-    .where(eq(challenges.id, row.challengeId))
+    .where(eq(challenges.id, row.challenge_id))
     .get();
   if (!challenge) return c.json({ success: false, error: '挑战不存在' }, 404);
 
-  const scores = scoreSubmission(challenge.rawText, body.segmented_text, challenge.answerKeyJson);
+  const scores = scoreSubmission(challenge.raw_text, body.segmented_text, challenge.answer_key_json);
   await db.update(modelResults).set({
-    segmentedText: body.segmented_text,
-    scoreTotal: scores.score_total,
-    scoreSegment: scores.score_segment,
-    scorePenalty: scores.score_penalty,
+    segmented_text: body.segmented_text,
+    score_total: scores.score_total,
+    score_segment: scores.score_segment,
+    score_penalty: scores.score_penalty,
   }).where(eq(modelResults.id, id)).run();
   return c.json({ success: true, data: scores });
 });
@@ -205,12 +205,12 @@ admin.post('/daily-challenge', async (c) => {
     .get();
   if (!challenge) return c.json({ success: false, error: '挑战不存在' }, 404);
   await db.insert(dailyChallenges).values({
-    challengeDate: date,
-    challengeId: challenge.id,
+    challenge_date: date,
+    challenge_id: challenge.id,
   })
     .onConflictDoUpdate({
-      target: dailyChallenges.challengeDate,
-      set: { challengeId: challenge.id },
+      target: dailyChallenges.challenge_date,
+      set: { challenge_id: challenge.id },
     })
     .run();
   return c.json({ success: true });

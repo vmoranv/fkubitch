@@ -11,13 +11,13 @@ leaderboard.get('/', async (c) => {
   const db = createDb(c.env.DB);
 
   const rows = await db.select({
-    user_id: users.publicId,
+    user_id: users.public_id,
     nickname: users.nickname,
-    avatar_url: users.avatarUrl,
-    score: users.totalScore,
+    avatar_url: users.avatar_url,
+    score: users.total_score,
   })
     .from(users)
-    .orderBy(sql`${users.totalScore} DESC`)
+    .orderBy(sql`${users.total_score} DESC`)
     .limit(limit)
     .all();
 
@@ -33,14 +33,14 @@ leaderboard.get('/models', async (c) => {
 
   const rows = await db.select({
     provider: modelResults.provider,
-    model_name: modelResults.modelName,
-    avg_score: sql<number>`cast(avg(${modelResults.scoreTotal}) as int)`,
+    model_name: modelResults.model_name,
+    avg_score: sql<number>`cast(avg(${modelResults.score_total}) as int)`,
     runs: sql<number>`cast(count(*) as int)`,
-    best_score: sql<number>`max(${modelResults.scoreTotal})`,
+    best_score: sql<number>`max(${modelResults.score_total})`,
   })
     .from(modelResults)
-    .groupBy(modelResults.provider, modelResults.modelName)
-    .orderBy(sql`avg(${modelResults.scoreTotal}) DESC`)
+    .groupBy(modelResults.provider, modelResults.model_name)
+    .orderBy(sql`avg(${modelResults.score_total}) DESC`)
     .limit(limit)
     .all();
 

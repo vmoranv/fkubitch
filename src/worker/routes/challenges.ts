@@ -31,14 +31,14 @@ challengesRouter.get('/', async (c) => {
   const items = await db.select()
     .from(challenges)
     .where(eq(challenges.status, 'published'))
-    .orderBy(desc(challenges.playCount), desc(challenges.createdAt))
+    .orderBy(desc(challenges.play_count), desc(challenges.created_at))
     .limit(limit)
     .offset(offset)
     .all();
 
   const trimmed = items.map((r) => {
-    if (r.rawText.length > 30) {
-      return { ...r, rawText: r.rawText.slice(0, 30) + '…' };
+    if (r.raw_text.length > 30) {
+      return { ...r, raw_text: r.raw_text.slice(0, 30) + '…' };
     }
     return r;
   });
@@ -57,8 +57,8 @@ challengesRouter.get('/daily', async (c) => {
 
   const daily = await db.select()
     .from(challenges)
-    .innerJoin(dailyChallenges, eq(challenges.id, dailyChallenges.challengeId))
-    .where(eq(dailyChallenges.challengeDate, today))
+    .innerJoin(dailyChallenges, eq(challenges.id, dailyChallenges.challenge_id))
+    .where(eq(dailyChallenges.challenge_date, today))
     .get();
   if (daily) return c.json({ success: true, data: daily.challenges });
 
@@ -70,8 +70,8 @@ challengesRouter.get('/daily', async (c) => {
     .get();
   if (fallback) {
     await db.insert(dailyChallenges).values({
-      challengeDate: today,
-      challengeId: fallback.id,
+      challenge_date: today,
+      challenge_id: fallback.id,
     })
       .onConflictDoNothing()
       .run();
@@ -90,7 +90,7 @@ challengesRouter.post('/submit', requireAuth, async (c) => {
 
   const user = await db.select({ id: users.id, role: users.role })
     .from(users)
-    .where(eq(users.publicId, userId))
+    .where(eq(users.public_id, userId))
     .get();
   if (!user) return c.json({ success: false, error: '用户不存在' }, 401);
 
@@ -104,10 +104,10 @@ challengesRouter.post('/submit', requireAuth, async (c) => {
   const status = user.role === 'admin' ? 'published' : 'pending';
   await db.insert(challenges).values({
     slug,
-    rawText: body.raw_text,
-    answerKeyJson: body.answer_key_json,
+    raw_text: body.raw_text,
+    answer_key_json: body.answer_key_json,
     status: status as 'draft' | 'published' | 'archived' | 'pending',
-    submittedBy: user.id,
+    submitted_by: user.id,
   }).run();
 
   return c.json({ success: true, data: { slug, status } });
@@ -136,20 +136,20 @@ challengesRouter.get('/:slug/submissions', async (c) => {
   const limit = Math.min(parseInt(c.req.query('limit') || '10'), 20);
   const subs = await db.select({
     id: submissions.id,
-    public_id: submissions.publicId,
-    user_id: submissions.userId,
-    challenge_id: submissions.challengeId,
-    segmented_text: submissions.segmentedText,
-    score_total: submissions.scoreTotal,
-    score_segment: submissions.scoreSegment,
-    score_penalty: submissions.scorePenalty,
-    created_at: submissions.createdAt,
+    public_id: submissions.public_id,
+    user_id: submissions.user_id,
+    challenge_id: submissions.challenge_id,
+    segmented_text: submissions.segmented_text,
+    score_total: submissions.score_total,
+    score_segment: submissions.score_segment,
+    score_penalty: submissions.score_penalty,
+    created_at: submissions.created_at,
     user_nickname: users.nickname,
   })
     .from(submissions)
-    .innerJoin(users, eq(submissions.userId, users.id))
-    .where(eq(submissions.challengeId, challenge.id))
-    .orderBy(desc(submissions.scoreTotal))
+    .innerJoin(users, eq(submissions.user_id, users.id))
+    .where(eq(submissions.challenge_id, challenge.id))
+    .orderBy(desc(submissions.score_total))
     .limit(limit)
     .all();
   return c.json({ success: true, data: subs });
@@ -167,8 +167,8 @@ challengesRouter.get('/:slug/model-results', async (c) => {
 
   const results = await db.select()
     .from(modelResults)
-    .where(eq(modelResults.challengeId, challenge.id))
-    .orderBy(desc(modelResults.scoreTotal))
+    .where(eq(modelResults.challenge_id, challenge.id))
+    .orderBy(desc(modelResults.score_total))
     .all();
   return c.json({ success: true, data: results });
 });
@@ -203,18 +203,18 @@ challengesRouter.post('/:slug/submit', requireAuth, submitCooldownMw, turnstileV
 
   const user = await db.select({ id: users.id })
     .from(users)
-    .where(eq(users.publicId, userId))
+    .where(eq(users.public_id, userId))
     .get();
   if (!user) return c.json({ success: false, error: '用户不存在' }, 401);
 
-  const scores = scoreSubmission(challenge.rawText, body.segmented_text, challenge.answerKeyJson);
+  const scores = scoreSubmission(challenge.raw_text, body.segmented_text, challenge.answer_key_json);
 
   const existingSame = await db.select({ id: submissions.id })
     .from(submissions)
     .where(and(
-      eq(submissions.userId, user.id),
-      eq(submissions.challengeId, challenge.id),
-      eq(submissions.segmentedText, body.segmented_text),
+      eq(submissions.user_id, user.id),
+      eq(submissions.challenge_id, challenge.id),
+      eq(submissions.segmented_text, body.segmented_text),
     ))
     .limit(1)
     .get();
@@ -224,93 +224,93 @@ challengesRouter.post('/:slug/submit', requireAuth, submitCooldownMw, turnstileV
 
   const progress = await db.select()
     .from(userChallengeProgress)
-    .where(and(eq(userChallengeProgress.userId, user.id), eq(userChallengeProgress.challengeId, challenge.id)))
+    .where(and(eq(userChallengeProgress.user_id, user.id), eq(userChallengeProgress.challenge_id, challenge.id)))
     .get();
 
   if (progress) {
     const na = progress.attempts + 1;
-    if (scores.score_total > (progress.bestScore ?? 0)) {
-      const diff = scores.score_total - (progress.bestScore ?? 0);
+    if (scores.score_total > (progress.best_score ?? 0)) {
+      const diff = scores.score_total - (progress.best_score ?? 0);
       await db.batch([
         db.insert(submissions).values({
-          publicId: submissionId,
-          userId: user.id,
-          challengeId: challenge.id,
-          segmentedText: body.segmented_text,
-          scoreTotal: scores.score_total,
-          scoreSegment: scores.score_segment,
-          scorePenalty: scores.score_penalty,
+          public_id: submissionId,
+          user_id: user.id,
+          challenge_id: challenge.id,
+          segmented_text: body.segmented_text,
+          score_total: scores.score_total,
+          score_segment: scores.score_segment,
+          score_penalty: scores.score_penalty,
         }),
         db.update(userChallengeProgress).set({
-          bestScore: scores.score_total,
+          best_score: scores.score_total,
           attempts: na,
-          lastSubmittedAt: sql`datetime('now')`,
-        }).where(and(eq(userChallengeProgress.userId, user.id), eq(userChallengeProgress.challengeId, challenge.id))),
+          last_submitted_at: sql`datetime('now')`,
+        }).where(and(eq(userChallengeProgress.user_id, user.id), eq(userChallengeProgress.challenge_id, challenge.id))),
         db.update(users).set({
-          totalScore: sql`${users.totalScore} + ${diff}`,
-          updatedAt: sql`datetime('now')`,
+          total_score: sql`${users.total_score} + ${diff}`,
+          updated_at: sql`datetime('now')`,
         }).where(eq(users.id, user.id)),
         db.update(challenges).set({
-          playCount: sql`${challenges.playCount} + 1`,
+          play_count: sql`${challenges.play_count} + 1`,
         }).where(eq(challenges.id, challenge.id)),
       ]);
     } else {
       await db.batch([
         db.insert(submissions).values({
-          publicId: submissionId,
-          userId: user.id,
-          challengeId: challenge.id,
-          segmentedText: body.segmented_text,
-          scoreTotal: scores.score_total,
-          scoreSegment: scores.score_segment,
-          scorePenalty: scores.score_penalty,
+          public_id: submissionId,
+          user_id: user.id,
+          challenge_id: challenge.id,
+          segmented_text: body.segmented_text,
+          score_total: scores.score_total,
+          score_segment: scores.score_segment,
+          score_penalty: scores.score_penalty,
         }),
         db.update(userChallengeProgress).set({
           attempts: na,
-          lastSubmittedAt: sql`datetime('now')`,
-        }).where(and(eq(userChallengeProgress.userId, user.id), eq(userChallengeProgress.challengeId, challenge.id))),
+          last_submitted_at: sql`datetime('now')`,
+        }).where(and(eq(userChallengeProgress.user_id, user.id), eq(userChallengeProgress.challenge_id, challenge.id))),
         db.update(challenges).set({
-          playCount: sql`${challenges.playCount} + 1`,
+          play_count: sql`${challenges.play_count} + 1`,
         }).where(eq(challenges.id, challenge.id)),
       ]);
     }
   } else {
     await db.batch([
       db.insert(submissions).values({
-        publicId: submissionId,
-        userId: user.id,
-        challengeId: challenge.id,
-        segmentedText: body.segmented_text,
-        scoreTotal: scores.score_total,
-        scoreSegment: scores.score_segment,
-        scorePenalty: scores.score_penalty,
+        public_id: submissionId,
+        user_id: user.id,
+        challenge_id: challenge.id,
+        segmented_text: body.segmented_text,
+        score_total: scores.score_total,
+        score_segment: scores.score_segment,
+        score_penalty: scores.score_penalty,
       }),
       db.insert(userChallengeProgress).values({
-        userId: user.id,
-        challengeId: challenge.id,
-        bestScore: scores.score_total,
+        user_id: user.id,
+        challenge_id: challenge.id,
+        best_score: scores.score_total,
         attempts: 1,
       }),
       db.update(users).set({
-        totalScore: sql`${users.totalScore} + ${scores.score_total}`,
-        updatedAt: sql`datetime('now')`,
+        total_score: sql`${users.total_score} + ${scores.score_total}`,
+        updated_at: sql`datetime('now')`,
       }).where(eq(users.id, user.id)),
       db.update(challenges).set({
-        playCount: sql`${challenges.playCount} + 1`,
+        play_count: sql`${challenges.play_count} + 1`,
       }).where(eq(challenges.id, challenge.id)),
     ]);
   }
 
-  const updatedUser = await db.select({ totalScore: users.totalScore })
+  const updatedUser = await db.select({ total_score: users.total_score })
     .from(users)
     .where(eq(users.id, user.id))
     .get();
   const rank = await db.select({ rank: sql<number>`cast(count(*) + 1 as int)` })
     .from(users)
-    .where(sql`${users.totalScore} > ${updatedUser?.totalScore || 0}`)
+    .where(sql`${users.total_score} > ${updatedUser?.total_score || 0}`)
     .get();
 
-  return c.json({ success: true, data: { submission_id: submissionId, ...scores, total_score: updatedUser?.totalScore, rank: rank?.rank } });
+  return c.json({ success: true, data: { submission_id: submissionId, ...scores, total_score: updatedUser?.total_score, rank: rank?.rank } });
 });
 
 export default challengesRouter;
