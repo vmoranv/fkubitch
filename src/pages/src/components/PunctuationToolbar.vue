@@ -27,7 +27,9 @@ watch(() => store.currentChallenge, (c) => {
 watch(segmentedText, (v) => store.syncFromEditor(v));
 
 const submitDisabled = computed(() =>
-  store.isSubmitting || (turnstileEnabled.value && !turnstileToken.value)
+  // Guests bypass Turnstile here — the click handler opens the login modal
+  // instead of submitting, so the button must stay clickable to surface it.
+  store.isSubmitting || (!auth.isGuest && turnstileEnabled.value && !turnstileToken.value)
 );
 
 async function handleSubmit() {
