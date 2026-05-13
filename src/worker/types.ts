@@ -41,6 +41,7 @@ export interface Env {
   GITHUB_CLIENT_SECRET: string;
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
+  TURNSTILE_ENABLED: string;
   TURNSTILE_SECRET_KEY: string;
   ADMIN_API_KEY: string;
   CORS_ORIGIN: string;

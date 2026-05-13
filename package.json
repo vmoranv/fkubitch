@@ -4,15 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "npx wrangler dev --local & cd src/pages && npx vite",
-    "dev:worker": "npx wrangler dev --local",
-    "dev:pages": "cd src/pages && npx vite",
-    "deploy": "npx wrangler deploy",
-    "db:init": "npx drizzle-kit generate && npx wrangler d1 migrations apply fub --local && npx wrangler d1 execute fub --local --file=src/worker/db/seed.sql",
-    "db:init:remote": "npx drizzle-kit generate && npx wrangler d1 migrations apply fub --remote && npx wrangler d1 execute fub --remote --file=src/worker/db/seed.sql",
-    "db:studio": "npx drizzle-kit studio",
+    "dev": "wrangler dev --local & cd src/pages && pnpm dev",
+    "dev:worker": "wrangler dev --local",
+    "dev:pages": "cd src/pages && pnpm dev",
+    "worker:deploy": "wrangler deploy",
+    "pages:deploy": "cd src/pages && pnpm build && cd ../.. && wrangler pages deploy src/pages/dist --project-name=fuckubitch --branch=master",
+    "db:init": "drizzle-kit generate && wrangler d1 migrations apply fub --local && wrangler d1 execute fub --local --file=src/worker/db/seed.sql",
+    "db:init:remote": "drizzle-kit generate && wrangler d1 migrations apply fub --remote && wrangler d1 execute fub --remote --file=src/worker/db/seed.sql",
+    "db:studio": "drizzle-kit studio",
     "pages:build": "cd src/pages && pnpm build",
-    "setup": "pnpm install && cd src/pages && pnpm install && pnpm db:init"
+    "bootstrap": "pnpm install && cd src/pages && pnpm install && cd ../.. && pnpm run db:init"
   },
   "dependencies": {
     "arctic": "^3.7.0",

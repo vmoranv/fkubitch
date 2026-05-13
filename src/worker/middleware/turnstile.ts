@@ -1,14 +1,15 @@
 import type { Context, Next } from 'hono';
 import type { Env } from '../types';
 
-// Cloudflare-provided "always passes" testing secret. When this (or no secret)
-// is configured, Turnstile is effectively disabled — bypass entirely instead
-// of round-tripping to siteverify, which still requires a matching dummy token.
-const ALWAYS_PASS_SECRET = '1x0000000000000000000000000000000';
+// Turnstile is opt-in. Flip TURNSTILE_ENABLED to "true" in wrangler vars
+// once a real secret is set via `wrangler secret put TURNSTILE_SECRET_KEY`
+// and the frontend mounts a Turnstile widget that supplies X-Turnstile-Token.
+function isEnabled(env: Env): boolean {
+  return env.TURNSTILE_ENABLED === 'true' && !!env.TURNSTILE_SECRET_KEY;
+}
 
 export async function turnstileVerify(c: Context<{ Bindings: Env }>, next: Next) {
-  const secret = c.env.TURNSTILE_SECRET_KEY;
-  if (!secret || secret === ALWAYS_PASS_SECRET) {
+  if (!isEnabled(c.env)) {
     await next();
     return;
   }
@@ -20,7 +21,7 @@ export async function turnstileVerify(c: Context<{ Bindings: Env }>, next: Next)
 
   try {
     const formData = new FormData();
-    formData.append('secret', secret);
+    formData.append('secret', c.env.TURNSTILE_SECRET_KEY);
     formData.append('response', turnstileToken);
 
     const result = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {

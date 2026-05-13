@@ -17,8 +17,8 @@
 ## Quick Start
 
 ```bash
-pnpm setup   # install deps + init db
-pnpm dev     # wrangler dev (8787) + vite dev (5173)
+pnpm bootstrap   # install deps + init local db
+pnpm dev         # wrangler dev (8787) + vite dev (5173)
 ```
 
 ## Deploy
@@ -26,8 +26,8 @@ pnpm dev     # wrangler dev (8787) + vite dev (5173)
 ```bash
 cp wrangler.toml.example wrangler.toml   # fill D1 ID + secrets
 pnpm db:init:remote
-pnpm deploy
-pnpm pages:build && npx wrangler pages deploy src/pages/dist
+pnpm worker:deploy
+pnpm pages:deploy
 ```
 
 ## API
