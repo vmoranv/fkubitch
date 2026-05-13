@@ -5,7 +5,7 @@ import { generateId, sha256 } from '../utils';
 import { scoreSubmission } from '../services/scoring';
 import { requireAuth } from '../middleware/auth';
 import { turnstileVerify } from '../middleware/turnstile';
-import { edgeCache } from '../middleware/cache';
+import { edgeCache, purgeCache } from '../middleware/cache';
 import { createDb } from '../db';
 import { challenges, submissions, users, userChallengeProgress, dailyChallenges } from '../db/schema';
 import { eq, desc, sql, and } from 'drizzle-orm';
@@ -211,6 +211,9 @@ challengesRouter.post('/:slug/submit', requireAuth, submitCooldownMw, turnstileV
 
   const scores = scoreSubmission(challenge.raw_text, body.segmented_text, challenge.answer_key_json);
 
+  // Best-effort duplicate check. Not race-safe (TOCTOU), but resubmitting an
+  // identical answer just costs an extra attempts counter — no scoring impact
+  // because the SQL below is idempotent on best_score.
   const existingSame = await db.select({ id: submissions.id })
     .from(submissions)
     .where(and(
@@ -224,84 +227,46 @@ challengesRouter.post('/:slug/submit', requireAuth, submitCooldownMw, turnstileV
 
   const submissionId = generateId('sub');
 
-  const progress = await db.select()
-    .from(userChallengeProgress)
-    .where(and(eq(userChallengeProgress.user_id, user.id), eq(userChallengeProgress.challenge_id, challenge.id)))
-    .get();
-
-  if (progress) {
-    const na = progress.attempts + 1;
-    if (scores.score_total > (progress.best_score ?? 0)) {
-      const diff = scores.score_total - (progress.best_score ?? 0);
-      await db.batch([
-        db.insert(submissions).values({
-          public_id: submissionId,
-          user_id: user.id,
-          challenge_id: challenge.id,
-          segmented_text: body.segmented_text,
-          score_total: scores.score_total,
-          score_segment: scores.score_segment,
-          score_penalty: scores.score_penalty,
-        }),
-        db.update(userChallengeProgress).set({
-          best_score: scores.score_total,
-          attempts: na,
-          last_submitted_at: sql`datetime('now')`,
-        }).where(and(eq(userChallengeProgress.user_id, user.id), eq(userChallengeProgress.challenge_id, challenge.id))),
-        db.update(users).set({
-          total_score: sql`${users.total_score} + ${diff}`,
-          updated_at: sql`datetime('now')`,
-        }).where(eq(users.id, user.id)),
-        db.update(challenges).set({
-          play_count: sql`${challenges.play_count} + 1`,
-        }).where(eq(challenges.id, challenge.id)),
-      ]);
-    } else {
-      await db.batch([
-        db.insert(submissions).values({
-          public_id: submissionId,
-          user_id: user.id,
-          challenge_id: challenge.id,
-          segmented_text: body.segmented_text,
-          score_total: scores.score_total,
-          score_segment: scores.score_segment,
-          score_penalty: scores.score_penalty,
-        }),
-        db.update(userChallengeProgress).set({
-          attempts: na,
-          last_submitted_at: sql`datetime('now')`,
-        }).where(and(eq(userChallengeProgress.user_id, user.id), eq(userChallengeProgress.challenge_id, challenge.id))),
-        db.update(challenges).set({
-          play_count: sql`${challenges.play_count} + 1`,
-        }).where(eq(challenges.id, challenge.id)),
-      ]);
-    }
-  } else {
-    await db.batch([
-      db.insert(submissions).values({
-        public_id: submissionId,
-        user_id: user.id,
-        challenge_id: challenge.id,
-        segmented_text: body.segmented_text,
-        score_total: scores.score_total,
-        score_segment: scores.score_segment,
-        score_penalty: scores.score_penalty,
-      }),
-      db.insert(userChallengeProgress).values({
-        user_id: user.id,
-        challenge_id: challenge.id,
-        best_score: scores.score_total,
-        attempts: 1,
-      }),
-      db.update(users).set({
-        total_score: sql`${users.total_score} + ${scores.score_total}`,
-        updated_at: sql`datetime('now')`,
-      }).where(eq(users.id, user.id)),
-      db.update(challenges).set({
-        play_count: sql`${challenges.play_count} + 1`,
-      }).where(eq(challenges.id, challenge.id)),
-    ]);
-  }
+  // All writes go through one D1 batch (atomic transaction). The previous
+  // read-then-write pattern had two TOCTOU races: two concurrent submits for
+  // the same user+challenge could both INSERT into user_challenge_progress
+  // (PK collision → batch rollback for one) or both apply the same
+  // best_score delta to users.total_score. The version below:
+  //   - INSERT ON CONFLICT lets the same statement handle first vs. repeat
+  //     submissions, and `MAX(...)` ensures best_score only ever climbs.
+  //   - users.total_score is recomputed as SUM(best_score) over progress,
+  //     which is idempotent regardless of concurrent execution order.
+  await db.batch([
+    db.insert(submissions).values({
+      public_id: submissionId,
+      user_id: user.id,
+      challenge_id: challenge.id,
+      segmented_text: body.segmented_text,
+      score_total: scores.score_total,
+      score_segment: scores.score_segment,
+      score_penalty: scores.score_penalty,
+    }),
+    db.insert(userChallengeProgress).values({
+      user_id: user.id,
+      challenge_id: challenge.id,
+      best_score: scores.score_total,
+      attempts: 1,
+    }).onConflictDoUpdate({
+      target: [userChallengeProgress.user_id, userChallengeProgress.challenge_id],
+      set: {
+        best_score: sql`MAX(COALESCE(${userChallengeProgress.best_score}, 0), excluded.best_score)`,
+        attempts: sql`${userChallengeProgress.attempts} + 1`,
+        last_submitted_at: sql`datetime('now')`,
+      },
+    }),
+    db.update(users).set({
+      total_score: sql`(SELECT COALESCE(SUM(${userChallengeProgress.best_score}), 0) FROM ${userChallengeProgress} WHERE ${userChallengeProgress.user_id} = ${user.id})`,
+      updated_at: sql`datetime('now')`,
+    }).where(eq(users.id, user.id)),
+    db.update(challenges).set({
+      play_count: sql`${challenges.play_count} + 1`,
+    }).where(eq(challenges.id, challenge.id)),
+  ]);
 
   const updatedUser = await db.select({ total_score: users.total_score })
     .from(users)
@@ -311,6 +276,21 @@ challengesRouter.post('/:slug/submit', requireAuth, submitCooldownMw, turnstileV
     .from(users)
     .where(sql`${users.total_score} > ${updatedUser?.total_score || 0}`)
     .get();
+
+  // Submitting changes the human leaderboard and challenge play_count.
+  // Purge only the URLs the frontend actually requests (HomePage + LeaderboardPage).
+  // Note: CF Cache API is colo-local — this only invalidates the colo that
+  // served the submit. Other colos rely on `maxAge` (60s) + SWR background
+  // revalidation, which is acceptable for a leaderboard.
+  c.executionCtx.waitUntil(Promise.all([
+    purgeCache(c, 'leaderboard-human', [
+      '/api/leaderboard',
+      '/api/leaderboard?period=all',
+    ]),
+    purgeCache(c, 'challenges-submissions', [
+      `/api/challenges/${slug}/submissions`,
+    ]),
+  ]));
 
   return c.json({ success: true, data: { submission_id: submissionId, ...scores, total_score: updatedUser?.total_score, rank: rank?.rank } });
 });
