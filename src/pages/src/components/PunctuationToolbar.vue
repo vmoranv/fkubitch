@@ -48,8 +48,8 @@ async function handleSubmit() {
   }
   message.value = '提交中...'; messageType.value = '';
   const r = await submitForScore(token);
-  if (r) { message.value = `得分 ${r.score_total}`; messageType.value = 'success'; }
-  else { message.value = '提交失败'; messageType.value = 'error'; }
+  if (r.data) { message.value = `得分 ${r.data.score_total}`; messageType.value = 'success'; }
+  else { message.value = r.error || '提交失败'; messageType.value = 'error'; }
   // Turnstile token is single-use; clear so the widget re-issues a fresh one.
   turnstileToken.value = '';
   setTimeout(() => message.value = '', 4000);

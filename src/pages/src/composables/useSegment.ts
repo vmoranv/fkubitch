@@ -7,8 +7,8 @@ export function useSegment() {
   const challengeStore = useChallengeStore();
   const guestStore = useGuestStore();
 
-  async function submitForScore(turnstileToken: string): Promise<ScoreData | null> {
-    if (!challengeStore.currentChallenge) return null;
+  async function submitForScore(turnstileToken: string): Promise<{ data: ScoreData | null; error?: string }> {
+    if (!challengeStore.currentChallenge) return { data: null };
     challengeStore.isSubmitting = true;
     try {
       const result = await useApi<ScoreData & { submission_id: string; total_score: number; rank: number }>(
@@ -21,9 +21,9 @@ export function useSegment() {
       );
       if (result.success && result.data) {
         challengeStore.submitResult = result.data;
-        return result.data;
+        return { data: result.data };
       }
-      return null;
+      return { data: null, error: result.error };
     } finally {
       challengeStore.isSubmitting = false;
     }
