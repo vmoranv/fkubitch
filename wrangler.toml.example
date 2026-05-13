@@ -15,10 +15,13 @@ GITHUB_CLIENT_ID = "your-github-client-id"
 GITHUB_CLIENT_SECRET = "your-github-client-secret"
 GOOGLE_CLIENT_ID = "your-google-client-id"
 GOOGLE_CLIENT_SECRET = "your-google-client-secret"
-# Set to "true" only after putting a real secret via
-#   wrangler secret put TURNSTILE_SECRET_KEY
-# and mounting a Turnstile widget in the frontend that supplies
-# X-Turnstile-Token on /challenges/:slug/submit.
+# Turnstile is opt-in. To enable:
+#   1. Get site key + secret key from Cloudflare → Turnstile
+#   2. Set TURNSTILE_SITE_KEY here (it ships to the browser, public)
+#   3. wrangler secret put TURNSTILE_SECRET_KEY  (never commit the secret)
+#   4. Flip TURNSTILE_ENABLED to "true"
+# Frontend reads TURNSTILE_SITE_KEY via /api/auth/config — no separate
+# build-time env var needed.
 TURNSTILE_ENABLED = "false"
-TURNSTILE_SECRET_KEY = "your-turnstile-secret"
+TURNSTILE_SITE_KEY = "your-turnstile-site-key"
 ADMIN_API_KEY = "your-admin-key"

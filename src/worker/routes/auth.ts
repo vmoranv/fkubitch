@@ -62,6 +62,7 @@ auth.get('/config', edgeCache({ cacheName: 'auth-config', maxAge: 3600, swr: 864
     data: {
       github: isConfigured(c.env.GITHUB_CLIENT_ID),
       google: isConfigured(c.env.GOOGLE_CLIENT_ID),
+      turnstile_site_key: c.env.TURNSTILE_ENABLED === 'true' ? (c.env.TURNSTILE_SITE_KEY || '') : '',
     },
   });
 });
