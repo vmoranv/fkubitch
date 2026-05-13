@@ -1,12 +1,13 @@
 import { Hono } from 'hono';
 import type { AppType } from '../types';
 import { createDb } from '../db';
+import { edgeCache } from '../middleware/cache';
 import { users, modelResults } from '../db/schema';
 import { sql } from 'drizzle-orm';
 
 const leaderboard = new Hono<AppType>();
 
-leaderboard.get('/', async (c) => {
+leaderboard.get('/', edgeCache({ cacheName: 'leaderboard-human', maxAge: 60, swr: 300 }), async (c) => {
   const limit = Math.min(parseInt(c.req.query('limit') || '10'), 10);
   const db = createDb(c.env.DB);
 
@@ -27,7 +28,7 @@ leaderboard.get('/', async (c) => {
   });
 });
 
-leaderboard.get('/models', async (c) => {
+leaderboard.get('/models', edgeCache({ cacheName: 'leaderboard-models', maxAge: 120, swr: 600 }), async (c) => {
   const limit = Math.min(parseInt(c.req.query('limit') || '10'), 10);
   const db = createDb(c.env.DB);
 

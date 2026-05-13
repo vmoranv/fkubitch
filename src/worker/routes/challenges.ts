@@ -5,6 +5,7 @@ import { generateId, sha256 } from '../utils';
 import { scoreSubmission } from '../services/scoring';
 import { requireAuth } from '../middleware/auth';
 import { turnstileVerify } from '../middleware/turnstile';
+import { edgeCache } from '../middleware/cache';
 import { createDb } from '../db';
 import { challenges, submissions, users, userChallengeProgress, dailyChallenges } from '../db/schema';
 import { eq, desc, sql, and } from 'drizzle-orm';
@@ -22,19 +23,25 @@ function pruneCooldown() {
   }
 }
 
-challengesRouter.get('/', async (c) => {
+challengesRouter.get('/', edgeCache({ cacheName: 'challenges-list', maxAge: 60, swr: 300 }), async (c) => {
   const page = parseInt(c.req.query('page') || '1');
   const limit = Math.min(parseInt(c.req.query('limit') || '20'), 50);
   const offset = (page - 1) * limit;
   const db = createDb(c.env.DB);
 
-  const items = await db.select()
-    .from(challenges)
-    .where(eq(challenges.status, 'published'))
-    .orderBy(desc(challenges.play_count), desc(challenges.created_at))
-    .limit(limit)
-    .offset(offset)
-    .all();
+  const [items, countResult] = await Promise.all([
+    db.select()
+      .from(challenges)
+      .where(eq(challenges.status, 'published'))
+      .orderBy(desc(challenges.play_count), desc(challenges.created_at))
+      .limit(limit)
+      .offset(offset)
+      .all(),
+    db.select({ total: sql<number>`cast(count(*) as int)` })
+      .from(challenges)
+      .where(eq(challenges.status, 'published'))
+      .get(),
+  ]);
 
   const trimmed = items.map((r) => {
     if (r.raw_text.length > 30) {
@@ -43,15 +50,10 @@ challengesRouter.get('/', async (c) => {
     return r;
   });
 
-  const countResult = await db.select({ total: sql<number>`cast(count(*) as int)` })
-    .from(challenges)
-    .where(eq(challenges.status, 'published'))
-    .get();
-
   return c.json({ success: true, data: { items: trimmed, total: countResult?.total || 0, page, limit } });
 });
 
-challengesRouter.get('/daily', async (c) => {
+challengesRouter.get('/daily', edgeCache({ cacheName: 'challenges-daily', maxAge: 300, swr: 3600 }), async (c) => {
   const today = new Date().toISOString().split('T')[0];
   const db = createDb(c.env.DB);
 
@@ -113,7 +115,7 @@ challengesRouter.post('/submit', requireAuth, async (c) => {
   return c.json({ success: true, data: { slug, status } });
 });
 
-challengesRouter.get('/:slug', async (c) => {
+challengesRouter.get('/:slug', edgeCache({ cacheName: 'challenges-single', maxAge: 120, swr: 600 }), async (c) => {
   const slug = c.req.param('slug')!;
   const db = createDb(c.env.DB);
   const row = await db.select()
@@ -124,7 +126,7 @@ challengesRouter.get('/:slug', async (c) => {
   return c.json({ success: true, data: row });
 });
 
-challengesRouter.get('/:slug/submissions', async (c) => {
+challengesRouter.get('/:slug/submissions', edgeCache({ cacheName: 'challenges-submissions', maxAge: 30, swr: 120 }), async (c) => {
   const slug = c.req.param('slug')!;
   const db = createDb(c.env.DB);
   const challenge = await db.select({ id: challenges.id })
@@ -155,7 +157,7 @@ challengesRouter.get('/:slug/submissions', async (c) => {
   return c.json({ success: true, data: subs });
 });
 
-challengesRouter.get('/:slug/model-results', async (c) => {
+challengesRouter.get('/:slug/model-results', edgeCache({ cacheName: 'challenges-model-results', maxAge: 60, swr: 300 }), async (c) => {
   const slug = c.req.param('slug')!;
   const db = createDb(c.env.DB);
   const { modelResults } = await import('../db/schema');
