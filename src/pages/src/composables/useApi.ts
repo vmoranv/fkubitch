@@ -9,9 +9,14 @@ export async function useApi<T>(
   const auth = useAuthStore();
 
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
     ...((options.headers as Record<string, string>) || {}),
   };
+
+  // Only attach Content-Type when there's a body — keeps GETs free of
+  // unnecessary headers and avoids CORS preflights in cross-origin setups.
+  if (options.body && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
 
   if (auth.accessToken) {
     headers['Authorization'] = `Bearer ${auth.accessToken}`;
